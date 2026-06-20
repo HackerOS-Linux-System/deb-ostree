@@ -1,0 +1,4 @@
+add_executable(test_config_parser test_config_parser.cpp)
+target_link_libraries(test_config_parser PRIVATE deb_ostree_core)
+target_include_directories(test_config_parser PRIVATE ${CMAKE_SOURCE_DIR})
+add_test(NAME config_parser COMMAND test_config_parser)
