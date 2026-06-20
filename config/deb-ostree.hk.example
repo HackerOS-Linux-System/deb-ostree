@@ -1,0 +1,35 @@
+! /etc/deb-ostree/deb-ostree.hk
+! Konfiguracja narzedzia deb-ostree w formacie .hk
+! (https://hackeros-linux-system.github.io/HackerOS-Website/tools-docs/hk.html)
+!
+! Ten plik jest generowany automatycznie przez hackeros-builder podczas
+! budowy obrazu (patrz hackeros-builder/internal/hkgen), ale mozesz go
+! tez edytowac recznie na zywym systemie.
+
+[sysroot]
+! Sciezka do sysroot zarzadzanego przez deb-ostree (zwykle "/")
+-> path => /
+
+[ostree]
+! Sciezka do repo OSTree wewnatrz sysroot
+-> repo_path => /ostree/repo
+
+[system]
+! Nazwa "osname" uzywana przy tworzeniu deploymentow w /ostree/deploy/<osname>/
+-> osname => debian
+
+[overlay]
+! Katalog roboczy uzywany przez overlayfs przy instalacji/usuwaniu pakietow.
+! Powinien byc na tym samym filesystemie co /ostree (dla efektywnych
+! hardlinkow/reflinkow podczas checkout), z wystarczajaca iloscia wolnego miejsca.
+-> work_dir => /var/lib/deb-ostree/overlay-work
+
+[apt]
+! Cache list pakietow apt (niezalezny od /var/lib/apt na zywym systemie)
+-> lists_path => /var/lib/deb-ostree/apt-cache
+
+[origin]
+! Refspec obrazu OCI uznawanego za "origin" tego deploymentu.
+! Ustawiane automatycznie przez "deb-ostree deploy/rebase", albo recznie
+! tutaj przy pierwszym bootstrapie (np. przez hackeros-builder).
+-> refspec => deb-ostree-oci:ghcr.io/przyklad/obraz:trixie
