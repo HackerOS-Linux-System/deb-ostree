@@ -1,3 +1,7 @@
 *.h linguist-detectable=true
 *.h linguist-documentation=false
 *.h linguist-language=C
+
+*.example linguist-detectable=true
+*.example linguist-documentation=false
+*.example linguist-language=HK
