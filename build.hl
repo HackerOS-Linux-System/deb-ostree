@@ -5,3 +5,9 @@
 > cd build
 > cmake ..
 > make
+
+;; > apt install libsolv-dev
+;; > apt install libostree-dev
+;; > apt install pkg-config
+;; > apt install -y build-essential
+;; install mising dependeces ^^^^^^^
