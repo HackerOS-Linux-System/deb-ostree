@@ -7,8 +7,15 @@ project(deb-ostree
     LANGUAGES CXX)
 
 # ── Standard i flagi ────────────────────────────────────────────────────────
-set(CMAKE_CXX_STANDARD          20)
+set(CMAKE_CXX_STANDARD          17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# UWAGA: C++17, nie C++20 -- libsolv (cmd/solv_pool.h, src/solv_pool.cpp)
+# uzywa struktury Solvable z polem nazwanym "requires", co koliduje z
+# "requires" jako slowem kluczowym C++20 (concepts). Podniesienie na C++20
+# wymagaloby owinięcia kazdego dostepu do <solv/*.h> w plik kompilowany
+# osobno jako C++17 (per-target standard override) -- prostsze jest
+# utrzymanie calego projektu na C++17, ktory nie ma tego konfliktu i
+# ktorego reszta kodu (libostree/GLib) nie wymaga zadnej cechy C++20.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -30,6 +37,22 @@ pkg_check_modules(GLIB    REQUIRED glib-2.0)
 pkg_check_modules(GOBJECT REQUIRED gobject-2.0)
 pkg_check_modules(GIO     REQUIRED gio-2.0)
 
+# Zaleznosci nowe od v0.0.1+ (eliminacja apt/dpkg jako "silnika pakietow"):
+#   libsolv      -- resolwer zaleznosci (SAT solver), pakiet: libsolv-dev
+#                   (.pc bywa nazwany "libsolv" lub trzeba go znalezc przez
+#                   find_library jesli .pc nie jest dostarczany -- patrz fallback nizej)
+#   libcurl      -- pobieranie Packages/.deb z mirror, pakiet: libcurl4-openssl-dev
+#   openssl      -- SHA256 do weryfikacji integralnosci pakietow, pakiet: libssl-dev
+#   liblzma      -- dekompresja .xz (Packages.xz, control/data.tar.xz), pakiet: liblzma-dev
+#   zlib         -- dekompresja .gz, pakiet: zlib1g-dev
+#   libzstd      -- dekompresja .zst (nowsze .deb), pakiet: libzstd-dev
+pkg_check_modules(LIBSOLV REQUIRED libsolv)
+pkg_check_modules(CURL    REQUIRED libcurl)
+pkg_check_modules(OPENSSL REQUIRED openssl)
+pkg_check_modules(LZMA    REQUIRED liblzma)
+pkg_check_modules(ZLIB    REQUIRED zlib)
+pkg_check_modules(ZSTD    REQUIRED libzstd)
+
 # ── Biblioteka core (statyczna) ──────────────────────────────────────────────
 #
 # Struktura plikow:
@@ -46,6 +69,14 @@ add_library(deb_ostree_core STATIC
     src/ostree_repo.cpp
     src/sysroot.cpp
     src/hk_parser.cpp
+    src/apt_repo_index.cpp
+    src/compress_util.cpp
+    src/tar_extractor.cpp
+    src/deb_archive.cpp
+    src/solv_pool.cpp
+    src/progress.cpp
+    src/deb_fetcher.cpp
+    src/status_db.cpp
 )
 
 # Headery z cmd/ sa widoczne jako "../cmd/<plik>.h" z poziomu src/.
@@ -63,6 +94,12 @@ target_include_directories(deb_ostree_core
         ${GLIB_INCLUDE_DIRS}
         ${GOBJECT_INCLUDE_DIRS}
         ${GIO_INCLUDE_DIRS}
+        ${LIBSOLV_INCLUDE_DIRS}
+        ${CURL_INCLUDE_DIRS}
+        ${OPENSSL_INCLUDE_DIRS}
+        ${LZMA_INCLUDE_DIRS}
+        ${ZLIB_INCLUDE_DIRS}
+        ${ZSTD_INCLUDE_DIRS}
 )
 
 target_link_directories(deb_ostree_core PUBLIC
@@ -70,6 +107,12 @@ target_link_directories(deb_ostree_core PUBLIC
     ${GLIB_LIBRARY_DIRS}
     ${GOBJECT_LIBRARY_DIRS}
     ${GIO_LIBRARY_DIRS}
+    ${LIBSOLV_LIBRARY_DIRS}
+    ${CURL_LIBRARY_DIRS}
+    ${OPENSSL_LIBRARY_DIRS}
+    ${LZMA_LIBRARY_DIRS}
+    ${ZLIB_LIBRARY_DIRS}
+    ${ZSTD_LIBRARY_DIRS}
 )
 
 target_link_libraries(deb_ostree_core
@@ -78,12 +121,20 @@ target_link_libraries(deb_ostree_core
         ${GLIB_LIBRARIES}
         ${GOBJECT_LIBRARIES}
         ${GIO_LIBRARIES}
+        ${LIBSOLV_LIBRARIES}
+        ${CURL_LIBRARIES}
+        ${OPENSSL_LIBRARIES}
+        ${LZMA_LIBRARIES}
+        ${ZLIB_LIBRARIES}
+        ${ZSTD_LIBRARIES}
         Threads::Threads
 )
 
 target_compile_options(deb_ostree_core PUBLIC
     ${OSTREE_CFLAGS_OTHER}
     ${GLIB_CFLAGS_OTHER}
+    ${LIBSOLV_CFLAGS_OTHER}
+    ${CURL_CFLAGS_OTHER}
 )
 
 # ── Binarka CLI ──────────────────────────────────────────────────────────────
