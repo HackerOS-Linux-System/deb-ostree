@@ -1,35 +1,42 @@
 ! /etc/deb-ostree/deb-ostree.hk
-! Konfiguracja narzedzia deb-ostree w formacie .hk
+! Konfiguracja narzędzia deb-ostree w formacie .hk
 ! (https://hackeros-linux-system.github.io/HackerOS-Website/tools-docs/hk.html)
 !
 ! Ten plik jest generowany automatycznie przez hackeros-builder podczas
-! budowy obrazu (patrz hackeros-builder/internal/hkgen), ale mozesz go
-! tez edytowac recznie na zywym systemie.
+! budowy obrazu (patrz hackeros-builder/internal/hkgen), ale możesz go
+! też edytować ręcznie na żywym systemie.
 
 [sysroot]
-! Sciezka do sysroot zarzadzanego przez deb-ostree (zwykle "/")
+! Ścieżka do sysroot zarządzanego przez deb-ostree (zwykle "/")
 -> path => /
 
 [ostree]
-! Sciezka do repo OSTree wewnatrz sysroot
+! Ścieżka do repo OSTree wewnątrz sysroot
 -> repo_path => /ostree/repo
 
 [system]
-! Nazwa "osname" uzywana przy tworzeniu deploymentow w /ostree/deploy/<osname>/
+! Nazwa "osname" używana przy tworzeniu deploymentów w /ostree/deploy/<osname>/
 -> osname => debian
 
 [overlay]
-! Katalog roboczy uzywany przez overlayfs przy instalacji/usuwaniu pakietow.
-! Powinien byc na tym samym filesystemie co /ostree (dla efektywnych
-! hardlinkow/reflinkow podczas checkout), z wystarczajaca iloscia wolnego miejsca.
+! Katalog roboczy używany przez overlayfs przy instalacji/usuwaniu pakietów.
+! Powinien być na tym samym filesystemie co /ostree (dla efektywnych
+! hardlinków/reflinkow podczas checkout), z wystarczającą ilością wolnego miejsca.
 -> work_dir => /var/lib/deb-ostree/overlay-work
 
 [apt]
-! Cache list pakietow apt (niezalezny od /var/lib/apt na zywym systemie)
+! Cache list pakietów apt (niezależny od /var/lib/apt na żywym systemie)
 -> lists_path => /var/lib/deb-ostree/apt-cache
 
+! Źródła pakietów -- odpowiednik /etc/apt/sources.list
+! Format: source_N => deb <url> <suite> <component...>
+! N musi być ciągłe od 1 (pierwsza luka kończy parsowanie)
+-> source_1 => deb http://deb.debian.org/debian bookworm main contrib non-free
+-> source_2 => deb http://security.debian.org/debian-security bookworm-security main contrib
+-> source_3 => deb http://deb.debian.org/debian bookworm-updates main contrib
+
 [origin]
-! Refspec obrazu OCI uznawanego za "origin" tego deploymentu.
-! Ustawiane automatycznie przez "deb-ostree deploy/rebase", albo recznie
+! Refspec obrazu OCI uznawany za "origin" tego deploymentu.
+! Ustawiany automatycznie przez "deb-ostree deploy/rebase", albo ręcznie
 ! tutaj przy pierwszym bootstrapie (np. przez hackeros-builder).
--> refspec => deb-ostree-oci:ghcr.io/przyklad/obraz:trixie
+-> refspec => deb-ostree-oci:ghcr.io/przyklad/obraz:bookworm
