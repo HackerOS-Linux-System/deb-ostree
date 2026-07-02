@@ -79,7 +79,11 @@ Result run(const std::vector<std::string>& argv,
     ::waitpid(pid, &status, 0);
     int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
-    return {.exit_code = code, .stdout_data = out, .stderr_data = err};
+    Result r;
+    r.exit_code   = code;
+    r.stdout_data = std::move(out);
+    r.stderr_data = std::move(err);
+    return r;
 }
 
 Result run_or_throw(const std::vector<std::string>& argv, const std::string& cwd) {
