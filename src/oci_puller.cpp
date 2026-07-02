@@ -16,10 +16,38 @@ OciPuller::OciPuller(std::string work_dir)
     fs::create_directories(work_dir_);
 }
 
+/* ── check_tools_available -- NOWE 0.1.0 (#4) ── */
+void OciPuller::check_tools_available() {
+    /* Sprawdź skopeo */
+    auto skopeo = process::run({"skopeo", "--version"});
+    if (!skopeo.ok()) {
+        throw std::runtime_error(
+            "OciPuller: 'skopeo' niedostepny (exit=" +
+            std::to_string(skopeo.exit_code) + ").\n"
+            "Zainstaluj: sudo apt-get install skopeo\n"
+            "Skopeo jest wymagany do pobierania obrazow OCI z registry.");
+    }
+
+    /* Sprawdź podman */
+    auto podman = process::run({"podman", "--version"});
+    if (!podman.ok()) {
+        throw std::runtime_error(
+            "OciPuller: 'podman' niedostepny (exit=" +
+            std::to_string(podman.exit_code) + ").\n"
+            "Zainstaluj: sudo apt-get install podman\n"
+            "Podman jest wymagany do scalania warstw obrazu OCI.");
+    }
+
+    log::debug("OciPuller: skopeo i podman dostepne");
+}
+
 std::string OciPuller::pull_and_unpack(const std::string& image_ref) {
-    std::string oci_dir   = work_dir_ + "/oci-image";
-    std::string rootfs    = work_dir_ + "/rootfs";
-    std::string tar_path  = work_dir_ + "/export.tar";
+    /* Early-check narzedzi (#4) -- failuje szybko z czytelnym komunikatem */
+    check_tools_available();
+
+    std::string oci_dir  = work_dir_ + "/oci-image";
+    std::string rootfs   = work_dir_ + "/rootfs";
+    std::string tar_path = work_dir_ + "/export.tar";
 
     fs::remove_all(oci_dir);
     fs::remove_all(rootfs);
@@ -28,41 +56,40 @@ std::string OciPuller::pull_and_unpack(const std::string& image_ref) {
 
     log::info("Sciagam obraz OCI: " + image_ref);
 
-    /* --- krok 1: skopeo copy do lokalnego OCI layout --- */
+    /* Krok 1: skopeo copy do lokalnego OCI layout */
     auto r = process::run({"skopeo", "copy",
                            "docker://" + image_ref,
                            "oci:" + oci_dir + ":latest"});
     if (!r.ok())
-        throw std::runtime_error("skopeo copy nie powiodlo sie dla " + image_ref +
-                                 ":\n" + r.stderr_data);
+        throw std::runtime_error(
+            "skopeo copy nie powiodlo sie dla " + image_ref + ":\n" + r.stderr_data);
 
-    /* --- krok 2: podman create (scala warstwy bez uruchamiania) --- */
+    /* Krok 2: podman create (scala warstwy bez uruchamiania) */
     const std::string cname = "deb-ostree-unpack-tmp";
-    process::run({"podman", "rm", "-f", cname}); /* ignorujemy blad jesli nie istnieje */
+    process::run({"podman", "rm", "-f", cname});
 
     auto cr = process::run({"podman", "create", "--name", cname,
                             "oci:" + oci_dir + ":latest"});
     if (!cr.ok())
-        throw std::runtime_error("podman create nie powiodlo sie:\n" + cr.stderr_data);
+        throw std::runtime_error(
+            "podman create nie powiodlo sie:\n" + cr.stderr_data);
 
-    /* --- krok 3: podman export -> tar ze scalonym rootfs --- */
+    /* Krok 3: podman export -> tar */
     auto er = process::run({"podman", "export", cname});
-    process::run({"podman", "rm", "-f", cname}); /* sprzatamy kontener */
+    process::run({"podman", "rm", "-f", cname});
 
     if (!er.ok())
-        throw std::runtime_error("podman export nie powiodlo sie:\n" + er.stderr_data);
+        throw std::runtime_error(
+            "podman export nie powiodlo sie:\n" + er.stderr_data);
 
-    /* Zapisujemy tar do pliku tymczasowego -- tar stdin przyjmuje stdin,
-     * ale bezpieczniej jest miec plik (latwy retry, diagnostyka rozmiaru). */
     {
         std::ofstream tf(tar_path, std::ios::binary);
-        if (!tf)
-            throw std::runtime_error("Nie mozna zapisac " + tar_path);
+        if (!tf) throw std::runtime_error("Nie mozna zapisac " + tar_path);
         tf.write(er.stdout_data.data(),
                  static_cast<std::streamsize>(er.stdout_data.size()));
     }
 
-    /* --- krok 4: rozpakowujemy tar do rootfs (z zachowaniem uprawnien) --- */
+    /* Krok 4: rozpakowywanie tar do rootfs */
     auto xr = process::run({"tar", "-xpf", tar_path,
                             "-C", rootfs,
                             "--same-owner",
@@ -71,8 +98,8 @@ std::string OciPuller::pull_and_unpack(const std::string& image_ref) {
     fs::remove(tar_path);
 
     if (!xr.ok())
-        throw std::runtime_error("Rozpakowywanie tar rootfs nie powiodlo sie:\n" +
-                                 xr.stderr_data);
+        throw std::runtime_error(
+            "Rozpakowywanie tar rootfs nie powiodlo sie:\n" + xr.stderr_data);
 
     log::info("Obraz rozpakowany do " + rootfs);
     return rootfs;
