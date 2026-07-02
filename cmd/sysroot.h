@@ -10,7 +10,7 @@
  *   2. Zachowuje poprzedni deployment jako dostepny do rollback.
  *   3. Nie dotyka aktywnie dzialajacego systemu -- zmiana wchodzi po reboot.
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include "types.h"
@@ -58,6 +58,14 @@ public:
      * na repo. Analog "rpm-ostree cleanup -p".
      */
     TransactionResult cleanup(int keep_last_n = 2);
+
+    /*
+     * Zapisuje zmodyfikowaną listę deploymentów (po zmianie flagi pinned itp.).
+     * Używane przez "deb-ostree pin" (#13 z listy braków).
+     *
+     * Wersja: 0.1.0
+     */
+    TransactionResult write_deployments(const std::vector<Deployment>& deployments);
 
     /* Fizyczna sciezka katalogu deployment na dysku:
      * /ostree/deploy/<osname>/deploy/<checksum>.<serial>  */
