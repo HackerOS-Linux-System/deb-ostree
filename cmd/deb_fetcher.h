@@ -1,73 +1,78 @@
 #pragma once
 /*
  * deb-ostree -- deb_fetcher.h
- * Pobieranie indeksow Packages i plikow .deb z mirror Debiana przez HTTP,
- * z weryfikacja SHA256 -- zastepuje "apt-get update"/"apt-get download".
+ * Pobieranie InRelease, indeksów Packages i plików .deb z mirrorów Debiana
+ * przez HTTP/HTTPS, z weryfikacją SHA256 i retry.
  *
- * Implementacja oparta na libcurl (przez prosty wrapper RAII) -- standardowa,
- * dobrze przetestowana biblioteka HTTP. Nie reimplementujemy klienta HTTP
- * od zera (poza zakresem tej rozbudowy -- liczy sie eliminacja apt/dpkg,
- * nie eliminacja libcurl).
- *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
+ *   - Dodano fetch_inrelease() -- pobieranie podpisanego pliku InRelease
+ *   - Dodano fetch_packages_index_with_release_verify() -- weryfikacja SHA256
+ *     indeksu względem sum z InRelease
+ *   - Dodano retry z wykładniczym cofaniem (3 próby, 2s/4s/8s)
+ *   - Dodano cache pobierania w tmp_dir (DebFetcher(tmp_dir))
  */
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <cstdint>
 
 namespace debostree::deb {
 
-/* Pojedyncza linia sources.list w uproszczonej, ale wystarczajacej formie:
- * "deb http://mirror/debian bookworm main contrib" rozbite na pola. */
 struct AptSource {
-    std::string base_url;   /* "http://deb.debian.org/debian" */
-    std::string suite;      /* "bookworm" / "trixie" / ... */
-    std::vector<std::string> components; /* ["main", "contrib", ...] */
+    std::string base_url;
+    std::string suite;
+    std::vector<std::string> components;
 };
 
-/* Parsuje linie w formacie sources.list (klasyczny, jednoliniowy format
- * "deb <url> <suite> <component...>") na AptSource. Rzuca std::runtime_error
- * przy nieprawidlowym formacie linii. */
 AptSource parse_apt_source_line(const std::string& line);
 
-/*
- * DebFetcher pobiera pliki z mirror Debiana (indeksy Packages, archiwa .deb)
- * przez HTTP/HTTPS, weryfikujac SHA256 gdy jest znany.
- */
 class DebFetcher {
 public:
-    DebFetcher();
+    /* tmp_dir: katalog na tymczasowe pliki i cache pobierania .deb */
+    explicit DebFetcher(const std::string& tmp_dir);
+    DebFetcher(); /* tmp_dir = /tmp/deb-ostree-fetch */
     ~DebFetcher();
     DebFetcher(const DebFetcher&) = delete;
     DebFetcher& operator=(const DebFetcher&) = delete;
 
-    /*
-     * Buduje URL indeksu Packages dla danego AptSource + component +
-     * architektura, sciaga go (probujac kolejno .xz, .gz, plain w tej
-     * kolejnosci -- preferujemy najmniejszy transfer) i zwraca
-     * ZDEKOMPRESOWANA tresc gotowa do apt::RepoIndex::parse().
-     */
-    std::string fetch_packages_index(const AptSource& source, const std::string& component,
+    /* Pobiera InRelease (podpisany plik z sumami) lub Release jako fallback.
+     * Nie weryfikuje GPG -- to robi gpg::GpgVerifier. */
+    std::string fetch_inrelease(const AptSource& source);
+
+    /* Pobiera i dekompresuje indeks Packages (.xz → .gz → plain).
+     * Retry: 3 dodatkowe próby z wykładniczym cofaniem. */
+    std::string fetch_packages_index(const AptSource& source,
+                                     const std::string& component,
                                      const std::string& arch = "amd64");
 
-    /*
-     * Sciaga plik .deb z mirror na podstawie base_url + filename (z pola
-     * "Filename:" w Packages) do dest_path. Jesli expected_sha256 nie jest
-     * pusty, weryfikuje sume kontrolna po pobraniu -- rzuca
-     * std::runtime_error przy niezgodnosci.
-     */
-    void fetch_deb_package(const std::string& base_url, const std::string& filename,
-                           const std::string& dest_path, const std::string& expected_sha256 = "");
+    /* Jak fetch_packages_index + weryfikacja SHA256 względem sum z InRelease
+     * (mapa: ścieżka_relatywna → sha256 z gpg::GpgVerifier::parse_release_checksums).
+     * Rzuca std::runtime_error gdy suma się nie zgadza. */
+    std::string fetch_packages_index_with_release_verify(
+        const AptSource& source,
+        const std::string& component,
+        const std::unordered_map<std::string, std::string>& release_checksums,
+        const std::string& arch = "amd64");
 
-private:
-    /* CURL* -- typ nieujawniony w headerze (void*), zeby nie wymagac
-     * <curl/curl.h> wszedzie gdzie ten plik jest wlaczany; tylko
-     * deb_fetcher.cpp potrzebuje prawdziwego typu CURL*. */
-    void* curl_handle_;
+    /* Pobiera plik .deb do dest_path z weryfikacją SHA256.
+     * Sprawdza cache pobierania w tmp_dir przed pobraniem z sieci.
+     * Retry: 3 dodatkowe próby z wykładniczym cofaniem. */
+    void fetch_deb_package(const std::string& base_url,
+                           const std::string& filename,
+                           const std::string& dest_path,
+                           const std::string& expected_sha256 = "");
 
     std::string fetch_url_to_string(const std::string& url);
     void fetch_url_to_file(const std::string& url, const std::string& dest_path);
+
+private:
+    void*       curl_handle_;
+    std::string tmp_dir_;
+
+    std::string fetch_url_to_string_with_retry(const std::string& url,
+                                               int max_retries = 3,
+                                               int retry_delay_s = 2);
 };
 
 } // namespace debostree::deb
