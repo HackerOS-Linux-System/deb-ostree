@@ -4,7 +4,7 @@
  * Wspolne typy domenowe uzywane w calym deb-ostree.
  * Analog koncepcyjny "rpmostree-types.h" z rpm-ostree.
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include <string>
@@ -76,6 +76,11 @@ struct Config {
     std::string osname           = "debian";
     std::string overlay_work_dir = "/var/lib/deb-ostree/overlay-work";
     std::string apt_lists_path   = "/var/lib/deb-ostree/apt-cache";
+
+    /* Architektura docelowa -- używana przy pobieraniu indeksów Packages.
+     * Domyślnie "amd64"; nadpisywalna przez --arch lub [apt] -> arch w .hk.
+     * Wersja: 0.1.0 (#5 multi-arch) */
+    std::string arch = "amd64";
     std::vector<std::string> apt_sources;
 };
 
