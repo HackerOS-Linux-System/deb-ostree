@@ -11,7 +11,7 @@
  * W przyszlosci mozna zastapic podman przez umoci lub wlasna implementacje
  * rozpakowywania warstw tar OCI -- patrz ROADMAP w README.md.
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include <string>
@@ -35,6 +35,13 @@ public:
      * Rzuca std::runtime_error przy bledach skopeo lub podman.
      */
     std::string pull_and_unpack(const std::string& image_ref);
+
+    /*
+     * Sprawdza dostepnosc skopeo i podman w PATH.
+     * Rzuca std::runtime_error z czytelnym komunikatem jesli brak.
+     * Wywolywane automatycznie przez pull_and_unpack (#4 z listy brakow).
+     */
+    static void check_tools_available();
 
 private:
     std::string work_dir_;
