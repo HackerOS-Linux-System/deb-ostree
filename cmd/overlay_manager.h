@@ -18,7 +18,7 @@
  * Tę deltę (lower + upper = scalona warstwa) commitujemy do OSTree jako
  * nowy commit -- read-only, bezpieczny, z pelnym rollbackiem.
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include <string>
