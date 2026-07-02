@@ -23,7 +23,7 @@
  *   Size: 1234567
  *   SHA256: a1b2c3...
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include <string>
