@@ -21,6 +21,7 @@ Config load_config(const std::string& path) {
     cfg.osname           = doc.getOr("system",  "osname",     cfg.osname);
     cfg.overlay_work_dir = doc.getOr("overlay", "work_dir",   cfg.overlay_work_dir);
     cfg.apt_lists_path   = doc.getOr("apt",     "lists_path", cfg.apt_lists_path);
+    cfg.arch             = doc.getOr("apt",     "arch",       cfg.arch);
 
     /* Parsowanie apt_sources: próbujemy source_1 .. source_32.
      * Zatrzymujemy się przy pierwszej luce (brak source_N oznacza koniec listy).
