@@ -21,7 +21,7 @@
  *   6. Wpis do lokalnej "bazy zainstalowanych pakietow" (status_db.h) --
  *      zastepuje /var/lib/dpkg/status, ktorej tu nie uzywamy.
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include "types.h"
