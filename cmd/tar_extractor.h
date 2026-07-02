@@ -16,7 +16,7 @@
  * NIE wspierane (rzadkie w kontekscie pakietow .deb, nie blokuje typowych
  * instalacji): urzadzenia znakowe/blokowe, FIFO, sparse files.
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include <string>
