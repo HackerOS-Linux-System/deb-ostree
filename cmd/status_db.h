@@ -14,7 +14,7 @@
  *   - is_installed() -- sprawdzenie czy pakiet jest juz w bazie
  *   - remove_packages() -- odczytanie listy plikow nalezacych do pakietu
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include <string>
