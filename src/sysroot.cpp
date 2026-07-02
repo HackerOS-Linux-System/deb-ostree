@@ -240,4 +240,49 @@ std::string Sysroot::deployment_path(const Deployment& dep) const {
     return p;
 }
 
+/* ---- Sysroot::write_deployments [NOWE 0.1.0] ---------------------------- */
+
+TransactionResult Sysroot::write_deployments(const std::vector<Deployment>& deps) {
+    TransactionResult res;
+
+    /* Pobieramy aktualne OstreeDeployment* z sysroot i zapisujemy w nowej
+     * kolejności z zaktualizowanymi flagami (pinned przez GKeyFile origin). */
+    GPtrArray* current = ostree_sysroot_get_deployments(sysroot_.get());
+    GPtrArray* reordered = g_ptr_array_new_with_free_func(g_object_unref);
+
+    for (auto& d : deps) {
+        for (guint i = 0; i < current->len; ++i) {
+            auto* dep = static_cast<::OstreeDeployment*>(g_ptr_array_index(current, i));
+            if (ostree_deployment_get_csum(dep) == d.checksum &&
+                ostree_deployment_get_deployserial(dep) == d.serial) {
+
+                /* Zaktualizuj flagę pinned w origin GKeyFile */
+                GKeyFile* origin = ostree_deployment_get_origin(dep);
+                if (origin) {
+                    if (d.pinned)
+                        g_key_file_set_boolean(origin, "deb-ostree", "pinned", TRUE);
+                    else
+                        g_key_file_remove_key(origin, "deb-ostree", "pinned", nullptr);
+                    ostree_deployment_set_origin(dep, origin);
+                }
+
+                g_ptr_array_add(reordered, g_object_ref(dep));
+                break;
+            }
+        }
+    }
+    g_ptr_array_unref(current);
+
+    GErrorGuard err;
+    if (!ostree_sysroot_write_deployments(sysroot_.get(), reordered, nullptr, err.ptr())) {
+        g_ptr_array_unref(reordered);
+        res.error_message = "write_deployments nie powiodlo sie";
+        return res;
+    }
+    g_ptr_array_unref(reordered);
+
+    res.success = true;
+    return res;
+}
+
 } // namespace debostree
