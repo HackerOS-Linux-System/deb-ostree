@@ -10,7 +10,7 @@
  * standardowe, dobrze przetestowane biblioteki kompresji. NIE
  * reimplementujemy algorytmow kompresji od zera.
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include <string>
