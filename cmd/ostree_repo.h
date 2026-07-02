@@ -10,7 +10,7 @@
  * Konwencja nazw: klasa C++ to debostree::ostree::Repo, bo typ C z libostree
  * to "OstreeRepo" -- unikamy konfliktu nazw w tej samej jednostce translacji.
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include <ostree.h>
