@@ -4,7 +4,7 @@
  * Prosty, kolorowy logger ANSI z poziomami DEBUG/INFO/WARN/ERROR.
  * Wyjscie kolorowe tylko gdy stdout/stderr jest TTY (np. nie do pliku/pipe).
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include <string_view>
