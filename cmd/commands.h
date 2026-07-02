@@ -7,7 +7,7 @@
  * Bledy wewnetrzne sa logowane przez debostree::log::error() PRZED zwroceniem 1,
  * zeby uzytkownik widzial czytelny komunikat, a nie tylko "exit 1".
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include "types.h"
@@ -25,5 +25,10 @@ int rebase    (const std::vector<std::string>& args, const Config& cfg);
 int deploy    (const std::vector<std::string>& args, const Config& cfg);
 int cleanup   (const std::vector<std::string>& args, const Config& cfg);
 int initramfs (const std::vector<std::string>& args, const Config& cfg);
+
+/* Nowe komendy -- 0.1.0 */
+int search    (const std::vector<std::string>& args, const Config& cfg);
+int list      (const std::vector<std::string>& args, const Config& cfg);
+int pin       (const std::vector<std::string>& args, const Config& cfg);
 
 } // namespace debostree::cmd
