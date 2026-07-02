@@ -29,7 +29,7 @@
  * tar_extractor -- deb_archive.cpp "rozumie" tylko format ar i sklada
  * pozostale moduly w calosc.
  *
- * Wersja: 0.0.1
+ * Wersja: 0.1.0
  */
 
 #include <string>
