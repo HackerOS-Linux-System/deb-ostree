@@ -4,6 +4,7 @@
 
 #include <curl/curl.h>
 #include <openssl/evp.h>
+#include <cstdlib>
 
 #include <fstream>
 #include <sstream>
@@ -158,8 +159,16 @@ std::string DebFetcher::fetch_url_to_string_with_retry(const std::string& url,
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "deb-ostree/0.1.0");
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "deb-ostree/0.2.0");
         curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+        /* Proxy HTTP/HTTPS ze zmiennych środowiskowych (#9) */
+        const char* http_proxy  = std::getenv("http_proxy");
+        const char* https_proxy = std::getenv("https_proxy");
+        const char* all_proxy   = std::getenv("all_proxy");
+        const char* proxy_val   = https_proxy ? https_proxy
+                                : (http_proxy ? http_proxy : all_proxy);
+        if (proxy_val && proxy_val[0])
+            curl_easy_setopt(curl, CURLOPT_PROXY, proxy_val);
 
         CURLcode res = curl_easy_perform(curl);
         if (res == CURLE_OK) return response;
@@ -200,8 +209,15 @@ void DebFetcher::fetch_url_to_file(const std::string& url, const std::string& de
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT, 600L);
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "deb-ostree/0.1.0");
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "deb-ostree/0.2.0");
         curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+        /* Proxy ze zmiennych środowiskowych (#9) */
+        {
+            const char* pv = std::getenv("https_proxy");
+            if (!pv) pv = std::getenv("http_proxy");
+            if (!pv) pv = std::getenv("all_proxy");
+            if (pv && pv[0]) curl_easy_setopt(curl, CURLOPT_PROXY, pv);
+        }
 
         CURLcode res = curl_easy_perform(curl);
         out.close();
