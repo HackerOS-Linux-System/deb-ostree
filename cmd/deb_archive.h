@@ -29,7 +29,7 @@
  * tar_extractor -- deb_archive.cpp "rozumie" tylko format ar i sklada
  * pozostale moduly w calosc.
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include <string>
@@ -52,6 +52,9 @@ struct ControlInfo {
     std::string breaks;
     std::string maintainer;
     std::string description;
+    std::string section;
+    std::string priority;
+    uint64_t    installed_size = 0; /* w KB, z pola "Installed-Size:" */
 };
 
 /*
