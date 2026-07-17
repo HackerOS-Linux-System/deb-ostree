@@ -65,6 +65,7 @@ int main() {
         } catch (const HkParseError&) {
             threw = true;
         }
+        (void)threw;
         assert(threw);
         std::cout << "[PASS] Test 5: blad przy kluczu bez sekcji\n";
     }
@@ -77,6 +78,7 @@ int main() {
         } catch (const HkParseError&) {
             threw = true;
         }
+        (void)threw;
         assert(threw);
         std::cout << "[PASS] Test 6: blad przy niezamknietej sekcji\n";
     }
