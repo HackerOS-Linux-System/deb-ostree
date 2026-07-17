@@ -3,7 +3,7 @@
  * deb-ostree -- solv_pool.h
  * Wrapper C++ na libsolv -- resolver zależności dla pakietów .deb.
  *
- * Wersja: 0.1.0 -- pełna obsługa OR-zależności, Breaks, Recommends,
+ * Wersja: 0.2.0 -- pełna obsługa OR-zależności, Breaks, Recommends,
  *                   multi-arch, resolve_upgrade, szczegółowa diagnostyka.
  *
  * Zmiany:
@@ -18,6 +18,7 @@
 
 #include "apt_repo_index.h"
 #include "status_db.h"
+#include "types.h"
 
 #include <solv/pool.h>
 #include <solv/repo.h>
@@ -114,6 +115,16 @@ public:
      */
     std::vector<ResolvedPackage> resolve_upgrade(
         const std::vector<std::string>& package_names = {});
+
+    /*
+     * Identyfikuje pakiety ktore sa zainstalowane ale nie sa juz potrzebne
+     * (osierocon e zaleznosci). Uzywa SOLVER_CLEANDEPS.
+     * explicit_pkgs: pakiety ktore uzytkownik jawnie zainstalowal (nie usuwamy ich).
+     * Nowe w 0.2.0 (#13 autoremove).
+     */
+    std::vector<std::string> resolve_autoremove(
+        const std::vector<statusdb::InstalledPackage>& installed,
+        const std::vector<PackageLayer>& explicit_pkgs);
 
     ::Pool* raw() { return pool_; }
 
