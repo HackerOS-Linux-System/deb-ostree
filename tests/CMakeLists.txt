@@ -1,10 +1,3 @@
-# deb-ostree -- tests/CMakeLists.txt
-# Rejestracja testów jednostkowych CTest.
-#
-# Wersja: 0.1.0 -- dodano test_solv_pool, test_status_db, test_apt_repo_index,
-#                   test_index_cache, test_gpg_verifier
-
-# Istniejący test
 add_executable(test_config_parser test_config_parser.cpp)
 target_link_libraries(test_config_parser PRIVATE deb_ostree_core)
 target_include_directories(test_config_parser PRIVATE ${CMAKE_SOURCE_DIR})
@@ -35,3 +28,15 @@ add_executable(test_gpg_verifier test_gpg_verifier.cpp)
 target_link_libraries(test_gpg_verifier PRIVATE deb_ostree_core)
 target_include_directories(test_gpg_verifier PRIVATE ${CMAKE_SOURCE_DIR})
 add_test(NAME gpg_verifier COMMAND test_gpg_verifier)
+
+# Test integracyjny v0.2.0 (#1)
+add_executable(test_integration test_integration.cpp)
+target_link_libraries(test_integration PRIVATE deb_ostree_core)
+target_include_directories(test_integration PRIVATE ${CMAKE_SOURCE_DIR})
+add_test(NAME integration COMMAND test_integration)
+
+# Test OCI ref v0.2.0
+add_executable(test_oci_ref test_oci_ref.cpp)
+target_link_libraries(test_oci_ref PRIVATE deb_ostree_core)
+target_include_directories(test_oci_ref PRIVATE ${CMAKE_SOURCE_DIR})
+add_test(NAME oci_ref COMMAND test_oci_ref)
