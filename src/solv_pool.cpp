@@ -240,8 +240,12 @@ void SolvPool::add_repo_from_index(const apt::RepoIndex& index,
 
     int added = 0;
     for (auto& entry : index.entries()) {
-        /* Pomiń pakiety o architekturze niezgodnej z pulą
-         * (zachowaj "all" -- pakiety architekturowo niezależne) */
+        /* Filtruj pakiety o architekturze niezgodnej z pula.
+         * Zawsze akceptuj:
+         *   - "all"   -- architekturalnie niezalezne (python3, fonts, doc)
+         *   - ""      -- brak pola Architecture (stare indeksy)
+         *   - arch_   -- architektura docelowa (amd64, arm64 itd.)
+         * Odrzucaj np. i386 gdy arch_=amd64, chyba ze mamy multi-arch. */
         if (!entry.architecture.empty() &&
             entry.architecture != "all" &&
             entry.architecture != arch_) {
@@ -254,7 +258,11 @@ void SolvPool::add_repo_from_index(const apt::RepoIndex& index,
         s->name = pool_str2id(pool_, entry.package.c_str(), 1);
         s->evr  = pool_str2id(pool_, entry.version.c_str(), 1);
 
-        /* arch: "all" -> "noarch" w libsolv */
+        /* arch: "all" -> "noarch" w libsolv.
+         * WAZNE: pool_setarch() musi byc wywolane PRZED add_repo_from_index.
+         * Libsolv traktuje "noarch" jako zawsze zgodne z architektura puli
+         * gdy pool->disttype = DISTTYPE_DEB -- wiec noarch jest zawsze
+         * instalowalne bez wzgledu na pool_setarch(). */
         std::string arch = (entry.architecture == "all") ? "noarch" : entry.architecture;
         if (arch.empty()) arch = arch_.empty() ? "amd64" : arch_;
         s->arch = pool_str2id(pool_, arch.c_str(), 1);
@@ -529,6 +537,12 @@ std::vector<std::string> SolvPool::resolve_remove(
 std::vector<ResolvedPackage> SolvPool::resolve_upgrade(
     const std::vector<std::string>& package_names)
 {
+    /* WAZNE (#8): Wykrywanie Breaks/Conflicts z nową wersją wymaga że
+     * zainstalowane pakiety są w puli jako @System (pool_set_installed).
+     * Caller MUSI wywołać add_installed_packages() PRZED resolve_upgrade()
+     * jeśli chce wykrywać konflikty nowej wersji z istniejącymi pakietami.
+     * pool_builder.cpp::build_solv_pool() robi to automatycznie. */
+
     pool_addfileprovides(pool_);
     pool_createwhatprovides(pool_);
 
@@ -605,6 +619,88 @@ std::vector<ResolvedPackage> SolvPool::resolve_upgrade(
 
     log::debug("SolvPool: resolve_upgrade: " + std::to_string(result.size())
                + " pakietów do aktualizacji");
+    return result;
+}
+
+} // namespace debostree::solv
+
+/* ── resolve_autoremove jest zdefiniowane w namespace debostree::solv ponizej ── */
+
+namespace debostree::solv {
+
+/* ── resolve_autoremove [NOWE 0.2.0] ── */
+
+std::vector<std::string> SolvPool::resolve_autoremove(
+    const std::vector<statusdb::InstalledPackage>& installed,
+    const std::vector<PackageLayer>& explicit_pkgs)
+{
+    pool_addfileprovides(pool_);
+    pool_createwhatprovides(pool_);
+
+    /* Zbierz nazwy pakietow jawnie zainstalowanych przez uzytkownika */
+    std::unordered_set<std::string> explicit_names;
+    for (auto& p : explicit_pkgs) explicit_names.insert(p.name);
+
+    /* Candidate do usuniecia: zainstalowane ale NIEOBECNE w explicit_pkgs.
+     * Czyli: zainstalowane jako zaleznosci, teraz potencjalnie osierocon e. */
+    std::vector<std::string> candidates;
+    for (auto& p : installed)
+        if (!explicit_names.count(p.name)) candidates.push_back(p.name);
+
+    if (candidates.empty()) return {};
+
+    ::Queue jobs;
+    queue_init(&jobs);
+
+    for (auto& name : candidates) {
+        ::Id name_id = pool_str2id(pool_, name.c_str(), 0);
+        if (name_id == 0) continue;
+        queue_push2(&jobs, SOLVER_ERASE | SOLVER_SOLVABLE_PROVIDES, name_id);
+    }
+
+    if (jobs.count == 0) {
+        queue_free(&jobs);
+        return {};
+    }
+
+    ::Solver* solver = solver_create(pool_);
+    solver_set_flag(solver, SOLVER_CLEANDEPS,        1); /* usun osierocon e */
+    solver_set_flag(solver, SOLVER_FLAG_ALLOW_UNINSTALL, 1);
+
+    int problem_count = solver_solve(solver, &jobs);
+    if (problem_count > 0) {
+        std::string err = format_solver_problems(solver);
+        solver_free(solver);
+        queue_free(&jobs);
+        throw SolvError(err);
+    }
+
+    ::Transaction* trans = solver_create_transaction(solver);
+    std::vector<std::string> result;
+    std::unordered_set<std::string> seen;
+
+    for (int i = 0; i < trans->steps.count; ++i) {
+        ::Id p = trans->steps.elements[i];
+        int ttype = transaction_type(trans, p, SOLVER_TRANSACTION_SHOW_ALL);
+        if (ttype != SOLVER_TRANSACTION_ERASE &&
+            ttype != SOLVER_TRANSACTION_OBSOLETED) continue;
+
+        ::Solvable* s = pool_id2solvable(pool_, p);
+        std::string pkg_name = pool_id2str(pool_, s->name);
+
+        /* Nie usuwaj pakietow jawnie zainstalowanych przez uzytkownika */
+        if (explicit_names.count(pkg_name)) continue;
+        if (seen.count(pkg_name)) continue;
+        seen.insert(pkg_name);
+        result.push_back(pkg_name);
+    }
+
+    transaction_free(trans);
+    solver_free(solver);
+    queue_free(&jobs);
+
+    log::debug("resolve_autoremove: " + std::to_string(result.size()) +
+               " osierocon ych pakietow");
     return result;
 }
 
