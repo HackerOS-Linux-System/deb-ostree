@@ -10,6 +10,7 @@
 #include "../cmd/gpg_verifier.h"
 #include "../cmd/logging.h"
 #include "../cmd/progress.h"
+#include "../cmd/oci_ref.h"
 #include "../cmd/tree_export.h"
 
 #include <iostream>
@@ -24,6 +25,13 @@ int upgrade(const std::vector<std::string>& /*args*/, const Config& cfg) {
         Sysroot sysroot = Sysroot::open(cfg.sysroot_path);
         auto booted = sysroot.booted_deployment();
         if (!booted) { log::error("Brak zabootowanego deploymentu."); return 1; }
+
+        /* Wymagaj ustawionego obrazu bazowego OCI */
+        try { oci::require_origin_refspec(booted->origin_refspec, "upgrade"); }
+        catch (const std::exception& e) {
+            std::cerr << "\033[1;31mBlad:\033[0m " << e.what() << "\n";
+            return 1;
+        }
 
         if (booted->origin_refspec.empty()) {
             log::error("Deployment nie ma ustawionego refspec -- uzyj 'rebase'.");
@@ -160,14 +168,26 @@ int upgrade(const std::vector<std::string>& /*args*/, const Config& cfg) {
 
             /* resolve_upgrade: tylko te z nowsza wersja (#6) */
             std::vector<solv::ResolvedPackage> to_upgrade;
+            bool upgrade_solver_failed = false;
             try {
                 to_upgrade = pool.resolve_upgrade(layer_names);
             } catch (const solv::SolvError& e) {
-                log::warn("resolve_upgrade: " + std::string(e.what()) +
-                          " -- pomijam upgrade warstw");
+                /* #7: zamiast cichego warn ktory maskuje problem -- jasno informujemy
+                 * uzytkownika ze warstwy NIE zostaly zaktualizowane i dlaczego. */
+                upgrade_solver_failed = true;
+                bar.end_stage("BLAD RESOLVERA -- warstwy niezmienione");
+                log::warn(
+                    "resolve_upgrade nie powiodlo sie -- pakiety warstwowe\n"
+                    "pozostana w poprzednich wersjach w nowym deploymencie:\n"
+                    + std::string(e.what()) +
+                    "\nUruchom 'deb-ostree list' i sprawdz konflikty.\n"
+                    "Mozesz recznie: deb-ostree uninstall <pkg> && deb-ostree install <pkg>");
             }
 
-            if (to_upgrade.empty()) {
+            if (upgrade_solver_failed) {
+                /* Deploy z niezmienionymi wersjami warstw -- uzytkownik jest poinformowany */
+                final_pkgs = booted->layered_packages;
+            } else if (to_upgrade.empty()) {
                 bar.end_stage("warstwy aktualne -- nic do zrobienia");
             } else {
                 bar.tick(0, static_cast<int>(to_upgrade.size()),
