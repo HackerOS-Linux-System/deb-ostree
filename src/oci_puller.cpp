@@ -1,9 +1,11 @@
 #include "../cmd/oci_puller.h"
 #include "../cmd/process.h"
 #include "../cmd/logging.h"
+#include "../cmd/progress.h"
 
 #include <filesystem>
 #include <fstream>
+#include <unistd.h>
 #include <stdexcept>
 
 namespace fs = std::filesystem;
@@ -16,92 +18,90 @@ OciPuller::OciPuller(std::string work_dir)
     fs::create_directories(work_dir_);
 }
 
-/* ── check_tools_available -- NOWE 0.1.0 (#4) ── */
 void OciPuller::check_tools_available() {
-    /* Sprawdź skopeo */
     auto skopeo = process::run({"skopeo", "--version"});
-    if (!skopeo.ok()) {
+    if (!skopeo.ok())
         throw std::runtime_error(
-            "OciPuller: 'skopeo' niedostepny (exit=" +
-            std::to_string(skopeo.exit_code) + ").\n"
-            "Zainstaluj: sudo apt-get install skopeo\n"
-            "Skopeo jest wymagany do pobierania obrazow OCI z registry.");
-    }
+            "OciPuller: 'skopeo' niedostepny.\n"
+            "Zainstaluj: sudo apt-get install skopeo");
 
-    /* Sprawdź podman */
     auto podman = process::run({"podman", "--version"});
-    if (!podman.ok()) {
+    if (!podman.ok())
         throw std::runtime_error(
-            "OciPuller: 'podman' niedostepny (exit=" +
-            std::to_string(podman.exit_code) + ").\n"
-            "Zainstaluj: sudo apt-get install podman\n"
-            "Podman jest wymagany do scalania warstw obrazu OCI.");
-    }
+            "OciPuller: 'podman' niedostepny.\n"
+            "Zainstaluj: sudo apt-get install podman");
 
-    log::debug("OciPuller: skopeo i podman dostepne");
+    log::debug("OciPuller: skopeo=" + skopeo.stdout_data.substr(0,20) +
+               " podman=" + podman.stdout_data.substr(0,20));
 }
 
 std::string OciPuller::pull_and_unpack(const std::string& image_ref) {
-    /* Early-check narzedzi (#4) -- failuje szybko z czytelnym komunikatem */
     check_tools_available();
 
-    std::string oci_dir  = work_dir_ + "/oci-image";
-    std::string rootfs   = work_dir_ + "/rootfs";
-    std::string tar_path = work_dir_ + "/export.tar";
-
-    fs::remove_all(oci_dir);
+    std::string rootfs = work_dir_ + "/rootfs";
     fs::remove_all(rootfs);
-    fs::remove(tar_path);
     fs::create_directories(rootfs);
 
     log::info("Sciagam obraz OCI: " + image_ref);
 
-    /* Krok 1: skopeo copy do lokalnego OCI layout */
-    auto r = process::run({"skopeo", "copy",
-                           "docker://" + image_ref,
-                           "oci:" + oci_dir + ":latest"});
-    if (!r.ok())
-        throw std::runtime_error(
-            "skopeo copy nie powiodlo sie dla " + image_ref + ":\n" + r.stderr_data);
-
-    /* Krok 2: podman create (scala warstwy bez uruchamiania) */
-    const std::string cname = "deb-ostree-unpack-tmp";
-    process::run({"podman", "rm", "-f", cname});
-
-    auto cr = process::run({"podman", "create", "--name", cname,
-                            "oci:" + oci_dir + ":latest"});
-    if (!cr.ok())
-        throw std::runtime_error(
-            "podman create nie powiodlo sie:\n" + cr.stderr_data);
-
-    /* Krok 3: podman export -> tar */
-    auto er = process::run({"podman", "export", cname});
-    process::run({"podman", "rm", "-f", cname});
-
-    if (!er.ok())
-        throw std::runtime_error(
-            "podman export nie powiodlo sie:\n" + er.stderr_data);
-
+    /* Krok 1: skopeo pull do storage podmana */
     {
-        std::ofstream tf(tar_path, std::ios::binary);
-        if (!tf) throw std::runtime_error("Nie mozna zapisac " + tar_path);
-        tf.write(er.stdout_data.data(),
-                 static_cast<std::streamsize>(er.stdout_data.size()));
+        progress::ScopedSpinner sp("skopeo: pull " + image_ref);
+        auto r = process::run({"skopeo", "copy",
+                               "--quiet",
+                               "docker://" + image_ref,
+                               "containers-storage:" + image_ref});
+        if (!r.ok()) {
+            sp.fail("skopeo copy: " + r.stderr_data.substr(0, 120));
+            throw std::runtime_error(
+                "skopeo copy nie powiodlo sie dla " + image_ref +
+                ":\n" + r.stderr_data);
+        }
+        sp.done();
     }
 
-    /* Krok 4: rozpakowywanie tar do rootfs */
-    auto xr = process::run({"tar", "-xpf", tar_path,
-                            "-C", rootfs,
-                            "--same-owner",
-                            "--xattrs",
-                            "--xattrs-include=*"});
-    fs::remove(tar_path);
+    /* Krok 2: podman image mount wewnatrz podman unshare -- zachowuje
+     * xattry i capabilities (#14).
+     *
+     * Strategia: podman unshare sh -c "podman image mount ... && cp -a ... && umount"
+     * cp -a jest rownowazne rsync -a: zachowuje hardlinki, uprawnienia, xattry,
+     * symlinki, pliki specjalne. Lepsze niz podman export ktory tworzy flat tar
+     * bez xattrow. */
+    {
+        progress::ScopedSpinner sp("podman: montowanie i eksport warstw");
 
-    if (!xr.ok())
-        throw std::runtime_error(
-            "Rozpakowywanie tar rootfs nie powiodlo sie:\n" + xr.stderr_data);
+        /* Timeout (#14): jeśli podman image mount zawiesi się (corrupted storage),
+         * alarm(2) wyśle SIGALRM po 300 sekundach co przerwie process::run(). */
+        ::alarm(300);
 
-    log::info("Obraz rozpakowany do " + rootfs);
+        std::string script =
+            "set -e\n"
+            "mnt=$(podman image mount " + image_ref + ")\n"
+            "cp -a \"$mnt/.\" " + rootfs + "/\n"
+            "podman image umount " + image_ref + "\n";
+
+        auto r = process::run({"podman", "unshare", "sh", "-c", script});
+        ::alarm(0); /* Anuluj alarm po zakończeniu */
+        if (!r.ok()) {
+            sp.fail("podman unshare: " + r.stderr_data.substr(0, 120));
+            /* Sprzatamy storage podmana */
+            process::run({"podman", "image", "rm", "-f", image_ref});
+            throw std::runtime_error(
+                "Eksport warstw OCI nie powiodl sie:\n" + r.stderr_data +
+                "\nUpewnij sie ze podman ma dostep do fuse-overlayfs lub kernel overlayfs.");
+        }
+        sp.done();
+    }
+
+    /* Krok 3: usun obraz z lokalnego storage podmana (nie potrzebny po eksporcie) */
+    {
+        auto r = process::run({"podman", "image", "rm", "-f", image_ref});
+        if (!r.ok())
+            log::warn("Nie mozna usunac obrazu z podman storage: " + r.stderr_data);
+    }
+
+    log::info("Obraz OCI rozpakowany do " + rootfs +
+              " (z zachowaniem xattrow i capabilities)");
     return rootfs;
 }
 
