@@ -11,7 +11,7 @@
  *   - Zero zależności poza <iostream> i <unistd.h>
  *   - Bezpieczny do użycia współbieżnie z log::info/warn (czeka na nową linię)
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include <string>
