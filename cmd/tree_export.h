@@ -13,7 +13,7 @@
  * ścieżkę (zachowuje hardlinki, urządzenia, uprawnienia, xattry)
  * z fallbackiem na własną iterację przez linkat(2)/mknod(2).
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include <string>
