@@ -1,42 +1,53 @@
 ! /etc/deb-ostree/deb-ostree.hk
-! Konfiguracja narzędzia deb-ostree w formacie .hk
-! (https://hackeros-linux-system.github.io/HackerOS-Website/tools-docs/hk.html)
+! Konfiguracja deb-ostree w formacie .hk (komentarze zaczynaja sie od '!')
 !
-! Ten plik jest generowany automatycznie przez hackeros-builder podczas
-! budowy obrazu (patrz hackeros-builder/internal/hkgen), ale możesz go
-! też edytować ręcznie na żywym systemie.
+! deb-ostree NIE wymaga zainstalowanego apt ani dpkg.
+! Uzywa tych samych plikow i sciezek co apt/dpkg:
+!   /etc/apt/sources.list      -- zrodla pakietow (czytane automatycznie)
+!   /var/lib/apt/lists/        -- cache indeksow Packages
+!   /var/lib/dpkg/status       -- baza zainstalowanych pakietow
+!   /var/lib/dpkg/info/        -- skrypty maintainer i listy plikow
+!   /etc/apt/trusted.gpg.d/    -- klucze GPG
+!
+! Minimalna konfiguracja dla systemu z /etc/apt/sources.list:
+! (tylko sekcje [sysroot], [ostree], [system] i [overlay] sa wymagane)
 
 [sysroot]
-! Ścieżka do sysroot zarządzanego przez deb-ostree (zwykle "/")
+! Sciezka do sysroot (zwykle "/" na zywo systemie)
 -> path => /
 
 [ostree]
-! Ścieżka do repo OSTree wewnątrz sysroot
+! Sciezka do repo OSTree wewnatrz sysroot
 -> repo_path => /ostree/repo
 
 [system]
-! Nazwa "osname" używana przy tworzeniu deploymentów w /ostree/deploy/<osname>/
+! Nazwa "osname" w /ostree/deploy/<osname>/
 -> osname => debian
 
 [overlay]
-! Katalog roboczy używany przez overlayfs przy instalacji/usuwaniu pakietów.
-! Powinien być na tym samym filesystemie co /ostree (dla efektywnych
-! hardlinków/reflinkow podczas checkout), z wystarczającą ilością wolnego miejsca.
+! Katalog roboczy transakcji deb-ostree
+! JEDYNA wlasna sciezka -- wszystko inne jest kompatybilne z apt/dpkg
 -> work_dir => /var/lib/deb-ostree/overlay-work
 
-[apt]
-! Cache list pakietów apt (niezależny od /var/lib/apt na żywym systemie)
--> lists_path => /var/lib/deb-ostree/apt-cache
-
-! Źródła pakietów -- odpowiednik /etc/apt/sources.list
-! Format: source_N => deb <url> <suite> <component...>
-! N musi być ciągłe od 1 (pierwsza luka kończy parsowanie)
--> source_1 => deb http://deb.debian.org/debian bookworm main contrib non-free
--> source_2 => deb http://security.debian.org/debian-security bookworm-security main contrib
--> source_3 => deb http://deb.debian.org/debian bookworm-updates main contrib
-
 [origin]
-! Refspec obrazu OCI uznawany za "origin" tego deploymentu.
-! Ustawiany automatycznie przez "deb-ostree deploy/rebase", albo ręcznie
-! tutaj przy pierwszym bootstrapie (np. przez hackeros-builder).
--> refspec => deb-ostree-oci:ghcr.io/przyklad/obraz:bookworm
+! Refspec obrazu OCI -- ustawiany automatycznie przez deploy/rebase
+! -> refspec => deb-ostree-oci:ghcr.io/mojorg/debian-bootc:bookworm
+
+! === OPCJONALNE: nadpisanie sciezek apt (domyslnie sa identyczne z apt) ===
+
+! [apt]
+! -> sources_list  => /etc/apt/sources.list
+! -> sources_dir   => /etc/apt/sources.list.d
+! -> lists_path    => /var/lib/apt/lists
+! -> keyring_dir   => /etc/apt/trusted.gpg.d
+! -> arch          => amd64
+! -> confext_mode  => none
+
+! === FALLBACK: zrodla apt dla srodowisk bez /etc/apt/sources.list ===
+! (np. builder/CI gdzie apt nie jest zainstalowany)
+! Odkomentuj ponizsze jezeli deb-ostree dziala poza systemem Debian:
+
+! [apt]
+! -> source_1 => deb http://deb.debian.org/debian bookworm main contrib non-free
+! -> source_2 => deb http://security.debian.org/debian-security bookworm-security main
+! -> source_3 => deb http://deb.debian.org/debian bookworm-updates main
