@@ -10,10 +10,14 @@
 #include "../cmd/gpg_verifier.h"
 #include "../cmd/dpkg_status.h"
 #include "../cmd/maintainer_scripts.h"
+#include "../cmd/confext.h"
+#include "../cmd/pool_builder.h"
+#include "../cmd/signal_guard.h"
 
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
@@ -40,96 +44,6 @@ std::string primary_mirror_base_url(const Config& cfg) {
     return src.base_url;
 }
 
-/* Buduje SolvPool z cache + GPG + @System.
- * Poprawka SHA256 (#3): weryfikujemy teraz skompresowaną formę (.xz/.gz)
- * przed dekompresją -- deb_fetcher pobiera i weryfikuje osobno. */
-solv::SolvPool build_pool(const Config& cfg,
-                          deb::DebFetcher& fetcher,
-                          progress::ProgressBar& bar,
-                          const std::string& rootfs_path = "")
-{
-    if (cfg.apt_sources.empty())
-        throw std::runtime_error(
-            "DebLayer: brak apt_sources -- dodaj source_N w deb-ostree.hk");
-
-    solv::SolvPool pool = solv::SolvPool::create(cfg.arch);
-    cache::IndexCache idx_cache(cfg.apt_lists_path);
-    gpg::GpgVerifier  verifier;
-
-    int total = 0;
-    for (auto& sl : cfg.apt_sources) {
-        deb::AptSource src = deb::parse_apt_source_line(sl);
-        total += static_cast<int>(src.components.size());
-    }
-
-    int done = 0, repo_idx = 0;
-    for (auto& source_line : cfg.apt_sources) {
-        deb::AptSource source = deb::parse_apt_source_line(source_line);
-
-        /* InRelease + GPG */
-        std::string inrelease;
-        std::unordered_map<std::string, std::string> release_checksums;
-        bool gpg_ok = false;
-        try {
-            inrelease = fetcher.fetch_inrelease(source);
-            auto vr = verifier.verify_inrelease(
-                inrelease, cfg.overlay_work_dir + "/gpg-tmp");
-            gpg_ok = vr.ok;
-            if (!gpg_ok)
-                throw std::runtime_error("GPG: " + vr.error_message);
-            release_checksums = gpg::GpgVerifier::parse_release_checksums(inrelease);
-        } catch (const std::exception& e) {
-            log::warn("GPG/InRelease " + source.suite + ": " + e.what());
-        }
-
-        for (auto& component : source.components) {
-            std::string label = source.suite + "/" + component;
-            bar.tick(done, total, label);
-
-            std::string packages_content;
-            auto cached = idx_cache.get(source.base_url, source.suite, component);
-            if (cached) {
-                packages_content = cached->packages_content;
-                bar.tick(done, total, label + " (cache)");
-            } else {
-                bar.spin("pobieranie " + label + "...");
-                try {
-                    /* fetch_packages_index_with_release_verify (#3):
-                     * pobiera .xz, weryfikuje SHA256 skompresowanej formy
-                     * względem sumy z InRelease, potem dekompresuje. */
-                    packages_content = fetcher.fetch_packages_index_with_release_verify(
-                        source, component, release_checksums, cfg.arch);
-                } catch (const std::exception& e) {
-                    log::warn("Pomijam " + label + ": " + e.what());
-                    ++done; continue;
-                }
-                cache::CacheEntry ce;
-                ce.packages_content  = packages_content;
-                ce.inrelease_content = inrelease;
-                ce.gpg_verified      = gpg_ok;
-                idx_cache.put(source.base_url, source.suite, component, ce);
-            }
-
-            apt::RepoIndex index = apt::RepoIndex::parse(packages_content);
-            pool.add_repo_from_index(index, label + "-" + std::to_string(repo_idx++));
-            ++done;
-            bar.tick(done, total,
-                     label + " (" + std::to_string(index.entries().size()) + " pkg)");
-        }
-    }
-
-    /* @System -- zainstalowane pakiety do detekcji konfliktów */
-    if (!rootfs_path.empty()) {
-        auto installed = statusdb::load(rootfs_path);
-        if (!installed.empty()) {
-            pool.add_installed_packages(installed);
-            log::debug("SolvPool @System: " + std::to_string(installed.size()) + " pkg");
-        }
-    }
-
-    return pool;
-}
-
 } // namespace
 
 /* ── install_packages ── */
@@ -153,7 +67,7 @@ std::vector<PackageLayer> DebLayer::install_packages(
     fs::create_directories(cfg_.overlay_work_dir + "/gpg-tmp");
     deb::DebFetcher fetcher(cfg_.overlay_work_dir + "/fetch-tmp");
     solv::SolvPool pool = [&]() {
-        try { return build_pool(cfg_, fetcher, bar, session.merged_dir); }
+        try { return build_solv_pool(cfg_, bar, session.merged_dir); }
         catch (...) { bar.fail("Blad indeksow"); throw; }
     }();
     bar.end_stage();
@@ -180,15 +94,24 @@ std::vector<PackageLayer> DebLayer::install_packages(
     fs::create_directories(download_dir);
 
     int pkg_idx = 0;
-    for (auto& pkg : resolved) {
-        bar.tick(pkg_idx, static_cast<int>(resolved.size()),
-                 pkg.name + " " + pkg.version + " " + format_size(pkg.size));
-        if (!pkg.filename.empty()) {
-            std::string dest = download_dir + "/" +
-                               fs::path(pkg.filename).filename().string();
-            fetcher.fetch_deb_package(mirror_base, pkg.filename, dest, pkg.sha256);
+    try {
+        for (auto& pkg : resolved) {
+            bar.tick(pkg_idx, static_cast<int>(resolved.size()),
+                     pkg.name + " " + pkg.version + " " + format_size(pkg.size));
+            if (!pkg.filename.empty()) {
+                std::string dest = download_dir + "/" +
+                                   fs::path(pkg.filename).filename().string();
+                fetcher.fetch_deb_package(mirror_base, pkg.filename, dest, pkg.sha256);
+            }
+            ++pkg_idx;
         }
-        ++pkg_idx;
+    } catch (...) {
+        /* Cleanup po bledzie pobierania (#6): usun download_dir zeby
+         * nastepne uruchomienie nie uzylo czesciowo pobranych/uszkodzonych plikow */
+        std::error_code ec;
+        fs::remove_all(download_dir, ec);
+        bar.fail("Blad pobierania -- katalog tymczasowy wyczyszczony");
+        throw;
     }
     bar.end_stage(format_size(total_size) + " pobrano");
 
@@ -219,6 +142,22 @@ std::vector<PackageLayer> DebLayer::install_packages(
 
         archive.extract_data_to(session.merged_dir);
 
+        /* Integracja z systemd-confext (#19): przetworz pliki /etc zgodnie
+         * z cfg_.confext_mode (none/separate/usr-etc) */
+        if (cfg_.confext_mode != "none") {
+            try {
+                std::vector<std::string> all_files = archive.list_data_files();
+                auto etc_files = confext::filter_etc_files(all_files);
+                if (!etc_files.empty()) {
+                    auto cmode = confext::parse_mode(cfg_.confext_mode);
+                    confext::process_etc_files(
+                        session.merged_dir, pkg.name, etc_files, cmode);
+                }
+            } catch (const std::exception& e) {
+                log::warn("confext: " + std::string(e.what()));
+            }
+        }
+
         try { all_ctrl.push_back(archive.read_control()); } catch (...) {}
         ++pkg_idx;
     }
@@ -244,11 +183,27 @@ std::vector<PackageLayer> DebLayer::install_packages(
         if (!postinst.empty())
             run_maintainer_script(session, pkg.name, postinst, "postinst");
 
-        /* status_db */
+        /* status_db -> /var/lib/dpkg/status z pelna metadana (jak dpkg) */
         statusdb::InstalledPackage entry;
         entry.name    = pkg.name;
         entry.version = pkg.version;
         entry.files   = files;
+
+        /* Uzupelnij metadane z control.tar jezeli dostepne */
+        try {
+            deb::ControlInfo ctrl = archive.read_control();
+            entry.architecture    = ctrl.architecture.empty() ? cfg_.arch : ctrl.architecture;
+            entry.maintainer      = ctrl.maintainer;
+            entry.description     = ctrl.description;
+            entry.depends         = ctrl.depends;
+            entry.pre_depends     = ctrl.pre_depends;
+            entry.provides        = ctrl.provides;
+            entry.section         = ctrl.section;
+            entry.installed_size  = ctrl.installed_size;
+        } catch (...) {
+            entry.architecture = cfg_.arch;
+        }
+
         statusdb::upsert(session.merged_dir, entry);
 
         PackageLayer pl;
@@ -293,9 +248,8 @@ void DebLayer::remove_packages(const OverlaySession& session,
 
     /* ── Etap 1: Indeksy ── */
     bar.begin_stage("Ladowanie indeksow");
-    deb::DebFetcher fetcher(cfg_.overlay_work_dir + "/fetch-tmp");
     solv::SolvPool pool = [&]() {
-        try { return build_pool(cfg_, fetcher, bar, session.merged_dir); }
+        try { return build_solv_pool(cfg_, bar, session.merged_dir); }
         catch (...) { bar.fail("Blad indeksow"); throw; }
     }();
     bar.end_stage();
@@ -384,7 +338,13 @@ void DebLayer::run_maintainer_script(const OverlaySession& session,
                                      const std::string& script_content,
                                      const std::string& script_name)
 {
-    std::string tmp_name = "/tmp-deb-ostree-" + package_name + "-" + script_name;
+    if (::geteuid() != 0) {
+        log::warn("Skrypt " + script_name + " " + package_name +
+                  " -- pomijam (brak uprawnien root)");
+        return;
+    }
+
+    std::string tmp_name  = "/tmp-deb-ostree-" + package_name + "-" + script_name;
     std::string host_path = session.merged_dir + tmp_name;
 
     {
@@ -396,13 +356,42 @@ void DebLayer::run_maintainer_script(const OverlaySession& session,
         fs::perms::group_exec | fs::perms::others_read |
         fs::perms::others_exec);
 
-    auto result = process::run({
-        "env", "-i",
-        "HOME=/root", "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
-        "DEBIAN_FRONTEND=noninteractive",
-        "DEBCONF_NONINTERACTIVE_SEEN=true",
-        "chroot", session.merged_dir, tmp_name, "configure"
-    });
+    /* Preferuj bwrap (bubblewrap) -- nie wymaga CAP_SYS_CHROOT,
+     * dziala bez dpkg w systemie, izoluje namespace.
+     * Fallback na chroot jesli bwrap niedostepny. */
+    auto bwrap_check = process::run({"bwrap", "--version"});
+    process::Result result;
+
+    if (bwrap_check.ok()) {
+        /* bwrap: sandbox bez dpkg/apt w hoscie */
+        result = process::run({
+            "bwrap",
+            "--bind",    session.merged_dir, "/",
+            "--dev",     "/dev",
+            "--proc",    "/proc",
+            "--tmpfs",   "/tmp",
+            "--setenv",  "HOME",                   "/root",
+            "--setenv",  "PATH",                   "/usr/bin:/bin:/usr/sbin:/sbin",
+            "--setenv",  "DEBIAN_FRONTEND",        "noninteractive",
+            "--setenv",  "DEBCONF_NONINTERACTIVE_SEEN", "true",
+            "--setenv",  "DEB_OSTREE",             "1",
+            "--die-with-parent",
+            "--",
+            tmp_name, "configure"
+        });
+    } else {
+        /* Fallback: chroot (wymaga root, ale nie dpkg) */
+        log::debug("bwrap niedostepny -- uzycie chroot dla " + script_name);
+        result = process::run({
+            "env", "-i",
+            "HOME=/root",
+            "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+            "DEBIAN_FRONTEND=noninteractive",
+            "DEBCONF_NONINTERACTIVE_SEEN=true",
+            "DEB_OSTREE=1",
+            "chroot", session.merged_dir, tmp_name, "configure"
+        });
+    }
 
     fs::remove(host_path);
 
