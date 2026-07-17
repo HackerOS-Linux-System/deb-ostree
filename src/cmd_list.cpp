@@ -1,10 +1,15 @@
 #include "../cmd/commands.h"
 #include "../cmd/sysroot.h"
 #include "../cmd/status_db.h"
+#include "../cmd/index_cache.h"
+#include "../cmd/apt_repo_index.h"
+#include "../cmd/deb_fetcher.h"
 #include "../cmd/logging.h"
 
 #include <iostream>
 #include <iomanip>
+#include <tuple>
+#include <algorithm>
 #include <algorithm>
 
 namespace debostree::cmd {
@@ -45,12 +50,14 @@ static void print_table(const std::vector<std::vector<std::string>>& rows,
 int list(const std::vector<std::string>& args, const Config& cfg) {
     bool show_deployments = false;
     bool show_files       = false;
+    bool show_upgradeable = false; /* #12 */
     std::string filter_pkg;
 
     for (auto& a : args) {
-        if (a == "--deployments" || a == "-d") show_deployments = true;
-        if (a == "--files"       || a == "-f") show_files       = true;
-        if (!a.empty() && a[0] != '-')         filter_pkg       = a;
+        if (a == "--deployments"  || a == "-d") show_deployments = true;
+        if (a == "--files"        || a == "-f") show_files       = true;
+        if (a == "--upgradeable"  || a == "-u") show_upgradeable = true;
+        if (!a.empty() && a[0] != '-')          filter_pkg       = a;
     }
 
     /* ── Tryb: lista deploymentów ── */
@@ -112,6 +119,58 @@ int list(const std::vector<std::string>& args, const Config& cfg) {
     if (rootfs_path.empty()) rootfs_path = cfg.sysroot_path;
 
     auto packages = statusdb::load(rootfs_path);
+
+    /* ── Tryb: lista dostepnych aktualizacji (#12) ── */
+    if (show_upgradeable) {
+        if (packages.empty()) {
+            std::cout << "Brak zainstalowanych pakietow warstwowych.\n";
+            return 0;
+        }
+        /* Porownaj zainstalowane wersje z dostepnymi w repo przez cache */
+        cache::IndexCache idx_cache(cfg.apt_lists_path);
+        std::vector<std::tuple<std::string,std::string,std::string>> upgradeable;
+        /* installed_version, available_version */
+
+        for (auto& source_line : cfg.apt_sources) {
+            deb::AptSource source = deb::parse_apt_source_line(source_line);
+            for (auto& component : source.components) {
+                auto cached = idx_cache.get(source.base_url, source.suite, component);
+                if (!cached) continue;
+                apt::RepoIndex index = apt::RepoIndex::parse(cached->packages_content);
+                for (auto& entry : index.entries()) {
+                    for (auto& installed : packages) {
+                        if (entry.package == installed.name &&
+                            entry.version != installed.version) {
+                            bool already = false;
+                            for (auto& [n,iv,av] : upgradeable)
+                                if (n == installed.name) { already = true; break; }
+                            if (!already)
+                                upgradeable.push_back({installed.name,
+                                                       installed.version,
+                                                       entry.version});
+                        }
+                    }
+                }
+            }
+        }
+
+        if (upgradeable.empty()) {
+            std::cout << "Wszystkie pakiety warstwowe sa aktualne.\n";
+            return 0;
+        }
+        std::cout << "Dostepne aktualizacje (" << upgradeable.size() << "):\n\n";
+        std::cout << std::left << std::setw(30) << "Pakiet"
+                  << std::setw(25) << "Zainstalowana"
+                  << "Dostepna\n";
+        std::cout << std::string(75, '-') << "\n";
+        for (auto& [name, inst, avail] : upgradeable) {
+            std::cout << std::left << std::setw(30) << name
+                      << std::setw(25) << inst
+                      << avail << "\n";
+        }
+        std::cout << "\nUruchom 'deb-ostree upgrade' aby zaaktualizowac.\n";
+        return 0;
+    }
 
     if (!filter_pkg.empty()) {
         /* Filtruj po nazwie */
