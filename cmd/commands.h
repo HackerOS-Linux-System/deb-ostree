@@ -1,13 +1,11 @@
 #pragma once
 /*
  * deb-ostree -- commands.h
- * Deklaracje funkcji podkomend CLI. Kazda odpowiada jednemu plikowi src/cmd_*.cpp.
+ * Deklaracje funkcji podkomend CLI.
  *
- * Sygnatura jest jednolita: (args, cfg) -> exit code (0 = sukces, 1 = blad).
- * Bledy wewnetrzne sa logowane przez debostree::log::error() PRZED zwroceniem 1,
- * zeby uzytkownik widzial czytelny komunikat, a nie tylko "exit 1".
- *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
+ *   - Dodano: update, autoremove
+ *   - Wersja bumped: 0.1.0 -> 0.2.0
  */
 
 #include "types.h"
@@ -16,6 +14,7 @@
 
 namespace debostree::cmd {
 
+/* ── v0.1.0 ── */
 int status    (const std::vector<std::string>& args, const Config& cfg);
 int install   (const std::vector<std::string>& args, const Config& cfg);
 int uninstall (const std::vector<std::string>& args, const Config& cfg);
@@ -25,10 +24,13 @@ int rebase    (const std::vector<std::string>& args, const Config& cfg);
 int deploy    (const std::vector<std::string>& args, const Config& cfg);
 int cleanup   (const std::vector<std::string>& args, const Config& cfg);
 int initramfs (const std::vector<std::string>& args, const Config& cfg);
-
-/* Nowe komendy -- 0.1.0 */
 int search    (const std::vector<std::string>& args, const Config& cfg);
 int list      (const std::vector<std::string>& args, const Config& cfg);
 int pin       (const std::vector<std::string>& args, const Config& cfg);
+
+/* ── v0.2.0 ── */
+int diff       (const std::vector<std::string>& args, const Config& cfg);
+int update      (const std::vector<std::string>& args, const Config& cfg);
+int autoremove  (const std::vector<std::string>& args, const Config& cfg);
 
 } // namespace debostree::cmd
