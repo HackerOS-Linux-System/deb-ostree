@@ -1,0 +1,186 @@
+.TH DEB\-OSTREE 1 "2025" "deb-ostree 0.2.0" "System Manager's Manual"
+.SH NAME
+deb\-ostree \- zarządzanie systemem Debian w modelu immutable/image-based
+.SH SYNOPSIS
+.B deb\-ostree
+[\fIopcje\fR] \fIkomenda\fR [\fIargumenty\fR]
+.SH OPIS
+.B deb\-ostree
+to narzędzie do zarządzania systemem Debian opartym na obrazach OSTree i OCI.
+Jest odpowiednikiem
+.BR rpm\-ostree (1)
+dla ekosystemu .deb/apt.
+
+Zamiast modyfikować aktywny system w miejscu, deb\-ostree tworzy nowy
+.I deployment
+(commit OSTree), który staje się aktywny po następnym reboot. Dzięki temu:
+.IP \(bu 2
+Każda zmiana jest atomowa i odwracalna (rollback jedną komendą)
+.IP \(bu
+Aktywny system nigdy nie jest modyfikowany podczas operacji
+.IP \(bu
+Poprzedni deployment jest zawsze dostępny do rollback
+.SH KOMENDY
+.SS Zarządzanie systemem
+.TP
+.B status
+Wyświetl aktywne i poprzednie deploymenty z pakietami warstwowymi i wersjami.
+.TP
+.B deploy \fIobraz:tag\fR
+Inicjalny deployment z obrazu OCI (bootstrap systemu).
+.TP
+.B upgrade
+Aktualizuj obraz bazowy (OCI) i selektywnie aktualizuj pakiety warstwowe.
+.TP
+.B rebase \fIobraz:tag\fR
+Przełącz na inny obraz bazowy OCI.
+.TP
+.B rollback
+Wróć do poprzedniego deploymentu.
+.TP
+.B cleanup [\-\-keep \fIN\fR]
+Usuń stare deploymenty. Domyślnie zachowuje 2 ostatnie.
+.TP
+.B pin \fIchecksum\fR
+Przypnij deployment (ochrona przed cleanup).
+.TP
+.B pin \-\-unpin \fIchecksum\fR
+Odpnij deployment.
+.TP
+.B pin \-\-list
+Wyświetl przypięte deploymenty.
+.SS Zarządzanie pakietami
+.TP
+.B install \fIpakiet\fR [\fIpakiet2\fR...]
+Zainstaluj pakiet(y) .deb jako warstwa na obrazie bazowym.
+.TP
+.B uninstall \fIpakiet\fR [\fIpakiet2\fR...]
+Usuń pakiet(y) warstwowe (alias: \fBremove\fR).
+.TP
+.B update
+Odśwież cache indeksów apt ze wszystkich skonfigurowanych źródeł.
+.TP
+.B search \fIwzorzec\fR
+Wyszukaj pakiet w indeksach repozytorium.
+.TP
+.B search \-\-exact \fInazwa\fR
+Szukaj dokładnej nazwy pakietu.
+.TP
+.B list
+Wyświetl zainstalowane pakiety warstwowe.
+.TP
+.B list \-\-deployments
+Wyświetl wszystkie deploymenty OSTree.
+.TP
+.B list \-\-upgradeable
+Pokaż dostępne aktualizacje pakietów warstwowych.
+.TP
+.B list \-\-files \fIpakiet\fR
+Wyświetl pliki należące do pakietu.
+.TP
+.B autoremove
+Usuń osierocone zależności (nieużywane pakiety automatycznie zainstalowane).
+.SH OPCJE
+.TP
+.BR \-v ", " \-\-verbose
+Włącz logi DEBUG.
+.TP
+.BI \-c " plik" ", " \-\-config " plik"
+Ścieżka do pliku konfiguracyjnego (domyślnie: \fI/etc/deb-ostree/deb-ostree.hk\fR).
+.TP
+.BI \-\-arch " architektura"
+Nadpisz architekturę (amd64, arm64, armhf, i386).
+.TP
+.B \-\-dry\-run
+Symuluj operację bez faktycznych zmian w systemie.
+.TP
+.BR \-V ", " \-\-version
+Wyświetl wersję i wyjdź.
+.TP
+.BR \-h ", " \-\-help
+Wyświetl pomoc i wyjdź.
+.SH KONFIGURACJA
+Plik konfiguracyjny w formacie .hk: \fI/etc/deb-ostree/deb-ostree.hk\fR
+.PP
+.nf
+[sysroot]
+-> path => /
+
+[ostree]
+-> repo_path => /ostree/repo
+
+[apt]
+-> lists_path => /var/lib/deb-ostree/apt-cache
+-> keyring_dir => /etc/apt/trusted.gpg.d
+-> arch => amd64
+-> source_1 => deb http://deb.debian.org/debian bookworm main contrib
+-> source_2 => deb http://security.debian.org/debian-security bookworm-security main
+
+[overlay]
+-> work_dir => /var/lib/deb-ostree/overlay-work
+.fi
+.SH FORMAT OBRAZU OCI
+deb-ostree wymaga obrazu bazowego OCI z pelna sciezka zawierajaca organizacje:
+.PP
+.nf
+Format:   [registry/]organizacja/obraz[:tag|@sha256:...]
+Przyklad: ghcr.io/twoja-org/debian-bootc:bookworm
+.fi
+.PP
+Obrazy bez organizacji (np. "debian:bookworm") NIE sa akceptowane.
+Wymagana pelna referencja gwarantuje powtarzalnosc i identyfikowalnosc obrazu.
+.SH PRZYKLADY
+.nf
+# Inicjalny deployment systemu
+sudo deb-ostree deploy ghcr.io/mojorg/debian-bootc:bookworm
+
+# Wyświetl stan systemu
+deb-ostree status
+
+# Odśwież indeksy apt
+sudo deb-ostree update
+
+# Szukaj pakietu
+deb-ostree search vim
+
+# Zainstaluj pakiet
+sudo deb-ostree install vim htop
+
+# Pokaż dostępne aktualizacje
+deb-ostree list --upgradeable
+
+# Aktualizuj system
+sudo deb-ostree upgrade
+
+# Wróć do poprzedniej wersji
+sudo deb-ostree rollback
+
+# Usuń stare deploymenty
+sudo deb-ostree cleanup --keep 2
+.fi
+.SH PLIKI
+.TP
+.I /etc/deb-ostree/deb-ostree.hk
+Główny plik konfiguracyjny.
+.TP
+.I /var/lib/deb-ostree/apt-cache/
+Cache indeksów apt (odpowiednik /var/lib/apt/lists/).
+.TP
+.I /var/lib/deb-ostree/overlay-work/
+Katalog roboczy transakcji (checkout, overlay, final-tree).
+.TP
+.I <rootfs>/var/lib/deb-ostree/status.jsonl
+Baza zainstalowanych pakietów warstwowych.
+.TP
+.I <rootfs>/var/lib/deb-ostree/info/<pkg>.{preinst,postinst,prerm,postrm}
+Skrypty maintainer zachowane po instalacji (do użycia przy deinstalacji).
+.SH "ZOBACZ TAKZE"
+.BR ostree (1),
+.BR rpm\-ostree (1),
+.BR apt (8),
+.BR skopeo (1),
+.BR podman (1)
+.SH AUTORZY
+deb\-ostree jest projektem open-source.
+.SH BLEDY
+Zgłaszaj błędy na: https://github.com/HackerOS-Linux-System/deb-ostree/issues
