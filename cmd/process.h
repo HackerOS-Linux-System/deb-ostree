@@ -7,7 +7,7 @@
  * Brak interpretacji powloki = brak ryzyka injection przy zmiennych zawierajacych
  * spacje lub znaki specjalne (nazwy pakietow, sciezki do workdir itd.).
  *
- * Wersja: 0.0.1
+ * Wersja: 0.2.0
  */
 
 #include <string>
