@@ -21,7 +21,7 @@
  * Jesli te funkcje sa potrzebne w przyszlosci, patrz pelna implementacja
  * referencyjna w hackeros-builder (internal/hk -- Go).
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include <string>
