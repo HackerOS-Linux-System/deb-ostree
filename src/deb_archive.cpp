@@ -101,6 +101,8 @@ ControlInfo parse_control_file(const std::vector<uint8_t>& content) {
         {"Breaks",       &info.breaks},
         {"Maintainer",   &info.maintainer},
         {"Description",  &info.description},
+        {"Section",      &info.section},
+        {"Priority",     &info.priority},
     };
 
     std::istringstream iss(std::string(content.begin(), content.end()));
@@ -127,6 +129,9 @@ ControlInfo parse_control_file(const std::vector<uint8_t>& content) {
         if (it != field_map.end()) {
             *(it->second) = value;
             current_field = it->second;
+        } else if (key == "Installed-Size") {
+            try { info.installed_size = std::stoull(value); } catch (...) {}
+            current_field = nullptr;
         } else {
             current_field = nullptr;
         }
