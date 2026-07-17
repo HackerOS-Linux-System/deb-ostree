@@ -24,7 +24,7 @@
  *   Description: Vi IMproved - enhanced vi editor
  *    Vi IMproved is an almost compatible version of the UNIX editor Vi.
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include <string>
