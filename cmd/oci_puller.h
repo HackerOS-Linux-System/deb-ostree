@@ -11,7 +11,7 @@
  * W przyszlosci mozna zastapic podman przez umoci lub wlasna implementacje
  * rozpakowywania warstw tar OCI -- patrz ROADMAP w README.md.
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include <string>
