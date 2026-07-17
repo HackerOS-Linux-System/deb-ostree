@@ -13,7 +13,7 @@
  *     <host>_<suite>_<component>_Packages.meta -- JSON z timestamp/sha256
  *     <host>_<suite>_InRelease                 -- podpisany plik InRelease
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include <string>
