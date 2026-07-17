@@ -2,9 +2,17 @@
 /*
  * deb-ostree -- types.h
  * Wspolne typy domenowe uzywane w calym deb-ostree.
- * Analog koncepcyjny "rpmostree-types.h" z rpm-ostree.
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
+ *   Pelna kompatybilnosc sciezek z dpkg/apt:
+ *     - /var/lib/dpkg/status       -- baza zainstalowanych pakietow (primary)
+ *     - /var/lib/dpkg/info/        -- pliki pakietow i skrypty maintainer
+ *     - /var/lib/apt/lists/        -- cache indeksow Packages
+ *     - /etc/apt/sources.list      -- zrodla apt (+ sources.list.d/)
+ *     - /etc/apt/trusted.gpg.d/    -- klucze GPG
+ *
+ * deb-ostree nie wywoluje apt ani dpkg jako procesow.
+ * Czyta/pisze te pliki bezposrednio (wlasny parser RFC822, wlasny resolver).
  */
 
 #include <string>
@@ -13,74 +21,67 @@
 
 namespace debostree {
 
-/* Operacja wykonana na pakiecie warstwowym. */
-enum class LayerOp {
-    Install,
-    Uninstall,
-    Override,
-};
+enum class LayerOp { Install, Uninstall, Override };
 
-/*
- * Pojedynczy pakiet .deb nalozony jako warstwa na obraz bazowy OSTree.
- * Lista PackageLayer jest zapisywana w pliku "origin" deploymentu (w kluczu
- * [deb-ostree] / layered-packages), zeby po upgrade bazy moc je ponownie
- * nalozyc -- analogicznie do rpm-ostree "packages" w origin.
- */
 struct PackageLayer {
-    std::string name;       /* nazwa pakietu, np. "vim"            */
-    std::string version;    /* faktycznie zainstalowana wersja      */
+    std::string name;
+    std::string version;
     LayerOp     op = LayerOp::Install;
 };
 
-/*
- * Jeden "deployment" = jeden zatwierdzony, bootowalny stan systemu.
- * Kazdy deployment ma unikalny checksum OSTree, numer seryjny w bootloaderze
- * (serial) i liste nalozonych pakietow warstwowych.
- *
- * Porzadek deploymentow w OstreeSysroot odpowiada porzadkowi w menu boot:
- *   index 0 = domyslny (aktualny lub staged)
- *   index 1 = poprzedni (dostepny jako rollback)
- *   index 2+ = starsze (zwykle usuwa je "cleanup")
- */
 struct Deployment {
-    std::string id;              /* np. "debian-a3f1b2c4d5.0"       */
-    std::string osname;          /* np. "debian"                     */
-    std::string checksum;        /* commit OSTree (sha256, 64 znaki) */
-    int         serial  = 0;     /* numer seryjny deploymentu        */
-    bool        booted  = false; /* true = aktualnie zabootowany     */
-    bool        staged  = false; /* true = czeka na nastepny reboot  */
-    bool        pinned  = false; /* true = chroniony przed cleanup   */
-    std::string origin_refspec;  /* np. "deb-ostree-oci:debian/bookworm:latest" */
+    std::string id;
+    uint64_t    timestamp = 0;
+    std::string osname;
+    std::string checksum;
+    int         serial  = 0;
+    bool        booted  = false;
+    bool        staged  = false;
+    bool        pinned  = false;
+    std::string origin_refspec;
     std::vector<PackageLayer> layered_packages;
 };
 
-/*
- * Wynik operacji commitujacych nowy deployment (install/upgrade/rebase/deploy).
- * Zamiast rzucac wyjatkami z warstwy komend, zwracamy ten struct -- wyjatki
- * sa uzywane tylko w wewnetrznych modulach (OstreeError, std::runtime_error).
- */
 struct TransactionResult {
-    bool        success          = false;
+    bool        success         = false;
     std::string new_checksum;
     std::string error_message;
-    bool        requires_reboot  = false;
+    bool        requires_reboot = false;
 };
 
-/*
- * Konfiguracja wczytywana z /etc/deb-ostree/deb-ostree.conf.
- * Wartosci domyslne odpowiadaja standardowemu systemowi Debian z bootc/OSTree.
- */
 struct Config {
     std::string sysroot_path     = "/";
     std::string ostree_repo_path = "/ostree/repo";
     std::string osname           = "debian";
-    std::string overlay_work_dir = "/var/lib/deb-ostree/overlay-work";
-    std::string apt_lists_path   = "/var/lib/deb-ostree/apt-cache";
 
-    /* Architektura docelowa -- używana przy pobieraniu indeksów Packages.
-     * Domyślnie "amd64"; nadpisywalna przez --arch lub [apt] -> arch w .hk.
-     * Wersja: 0.1.0 (#5 multi-arch) */
+    /* Katalog roboczy transakcji deb-ostree (jedyna wlasna sciezka) */
+    std::string overlay_work_dir = "/var/lib/deb-ostree/overlay-work";
+
+    /* === Sciezki identyczne z apt/dpkg === */
+
+    /* Cache indeksow Packages -- identyczny z /var/lib/apt/lists/
+     * Format plikow: <host>_dists_<suite>_<comp>_binary-<arch>_Packages */
+    std::string apt_lists_path = "/var/lib/apt/lists";
+
+    /* Plik konfiguracyjny zrodel apt -- czytany przez deb-ostree,
+     * NIE ma wlasnej listy source_N. Zrodla brane z systemu. */
+    std::string apt_sources_list = "/etc/apt/sources.list";
+
+    /* Katalog dodatkowych plikow sources.list.d/ */
+    std::string apt_sources_dir  = "/etc/apt/sources.list.d";
+
+    /* Klucze GPG -- identyczny z apt */
+    std::string keyring_dir = "/etc/apt/trusted.gpg.d";
+
+    /* Architektura -- domyslnie amd64, nadpisywalna przez --arch */
     std::string arch = "amd64";
+
+    /* Tryb confext dla plikow /etc (#19) */
+    std::string confext_mode = "none";
+
+    /* Lista zrodel apt -- wypelniana przez sources_parser z apt_sources_list
+     * i apt_sources_dir. Moze byc nadpisana przez [apt] -> source_N w .hk
+     * dla srodowisk bez zainstalowanego apt (np. builder/CI). */
     std::vector<std::string> apt_sources;
 };
 
