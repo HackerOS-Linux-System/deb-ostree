@@ -7,12 +7,13 @@
 #include <chrono>
 #include <algorithm>
 #include <cctype>
+#include <sys/stat.h>
 
 namespace fs = std::filesystem;
 
 namespace debostree::cache {
 
-/* ── Helpers ── */
+/* ── helpers ── */
 
 static uint64_t unix_now() {
     using namespace std::chrono;
@@ -20,46 +21,59 @@ static uint64_t unix_now() {
         duration_cast<seconds>(system_clock::now().time_since_epoch()).count());
 }
 
-/* Zamienia URL na bezpieczną nazwę pliku (zastępuje :/? znakiem _). */
-static std::string url_to_key(const std::string& url) {
-    std::string key;
-    key.reserve(url.size());
+/* Konwertuje URL na prefix pliku w stylu apt:
+ * http://deb.debian.org/debian -> deb.debian.org_debian
+ * (apt uzywa: host_path z '/' zastapione '_')
+ */
+static std::string url_to_apt_prefix(const std::string& base_url) {
+    std::string url = base_url;
+    /* Usun schemat (http:// https://) */
+    size_t scheme = url.find("://");
+    if (scheme != std::string::npos) url = url.substr(scheme + 3);
+    /* Usun trailing slash */
+    while (!url.empty() && url.back() == '/') url.pop_back();
+    /* Zamien '/' i ':' na '_' */
+    std::string result;
     for (char c : url) {
-        if (std::isalnum(static_cast<unsigned char>(c)) ||
-            c == '.' || c == '-') {
-            key += c;
-        } else {
-            key += '_';
-        }
+        result += (c == '/' || c == ':') ? '_' : c;
     }
-    /* Usuń wielokrotne podkreślenia */
-    std::string out;
-    bool prev_under = false;
-    for (char c : key) {
-        if (c == '_' && prev_under) continue;
-        out += c;
-        prev_under = (c == '_');
-    }
-    return out;
+    return result;
 }
 
-/* Minimalistyczny zapis/odczyt metadanych w formacie key=value */
-static void write_meta(const std::string& path, uint64_t ts, bool gpg_ok,
-                        const std::string& sha256 = "") {
+/* Buduje nazwe pliku Packages w stylu apt:
+ * <host_prefix>_dists_<suite>_<component>_binary-<arch>_Packages
+ * np. deb.debian.org_debian_dists_bookworm_main_binary-amd64_Packages
+ */
+static std::string apt_packages_filename(const std::string& base_url,
+                                          const std::string& suite,
+                                          const std::string& component,
+                                          const std::string& arch = "amd64") {
+    return url_to_apt_prefix(base_url) + "_dists_" + suite + "_"
+         + component + "_binary-" + arch + "_Packages";
+}
+
+/* Plik metadanych TTL (tylko dla deb-ostree, apt go ignoruje) */
+static std::string meta_filename(const std::string& base_url,
+                                  const std::string& suite,
+                                  const std::string& component,
+                                  const std::string& arch = "amd64") {
+    return apt_packages_filename(base_url, suite, component, arch) + ".deb-ostree-meta";
+}
+
+static void write_meta(const std::string& path, uint64_t ts, bool gpg_ok) {
     std::ofstream f(path, std::ios::trunc);
     f << "timestamp=" << ts << "\n"
-      << "gpg_verified=" << (gpg_ok ? "1" : "0") << "\n"
-      << "sha256=" << sha256 << "\n";
+      << "gpg_verified=" << (gpg_ok ? "1" : "0") << "\n";
 }
 
 static bool read_meta(const std::string& path, uint64_t& ts, bool& gpg_ok) {
     std::ifstream f(path);
     if (!f.is_open()) return false;
-    std::string line;
     ts = 0; gpg_ok = false;
+    std::string line;
     while (std::getline(f, line)) {
         if (line.rfind("timestamp=", 0) == 0)
-            ts = std::stoull(line.substr(10));
+            try { ts = std::stoull(line.substr(10)); } catch (...) {}
         if (line.rfind("gpg_verified=", 0) == 0)
             gpg_ok = (line.substr(13) == "1");
     }
@@ -76,63 +90,51 @@ IndexCache::IndexCache(std::string lists_dir, uint64_t max_age_s)
     fs::create_directories(lists_dir_, ec);
 }
 
-std::string IndexCache::make_key(const std::string& base_url,
-                                  const std::string& suite,
-                                  const std::string& component) const {
-    return url_to_key(base_url) + "_" + suite + "_" + component;
-}
-
-std::string IndexCache::packages_path(const std::string& key) const {
-    return lists_dir_ + "/" + key + "_Packages";
-}
-
-std::string IndexCache::meta_path(const std::string& key) const {
-    return lists_dir_ + "/" + key + "_Packages.meta";
-}
-
-std::string IndexCache::inrelease_path(const std::string& key) const {
-    /* InRelease jest per-suite, nie per-component.
-     * klucz = url_key + "_" + suite + "_" + component
-     * Wycinamy ostatni segment (_component) żeby uzyskać klucz per-suite. */
-    size_t last_under = key.rfind('_');
-    std::string suite_key = (last_under != std::string::npos)
-                            ? key.substr(0, last_under) : key;
-    return lists_dir_ + "/" + suite_key + "_InRelease";
-}
-
-uint64_t IndexCache::current_unix_time() const {
-    return unix_now();
-}
-
 std::optional<CacheEntry> IndexCache::get(const std::string& base_url,
                                            const std::string& suite,
                                            const std::string& component) const
 {
-    std::string key  = make_key(base_url, suite, component);
-    std::string pkgs = packages_path(key);
-    std::string meta = meta_path(key);
+    /* Sprawdz architekture z nazwy pliku -- domyslnie amd64 */
+    std::string arch = "amd64";
+    std::string pkgs_path = lists_dir_ + "/" +
+                            apt_packages_filename(base_url, suite, component, arch);
+    std::string meta_path = lists_dir_ + "/" +
+                            meta_filename(base_url, suite, component, arch);
 
-    if (!fs::exists(pkgs) || !fs::exists(meta)) return std::nullopt;
+    if (!fs::exists(pkgs_path)) return std::nullopt;
 
-    uint64_t ts; bool gpg_ok;
-    if (!read_meta(meta, ts, gpg_ok)) return std::nullopt;
-
-    uint64_t now = unix_now();
-    if (now - ts > max_age_s_) {
-        log::debug("cache: wpis " + key + " wygasł (" +
-                   std::to_string((now - ts) / 3600) + "h temu)");
-        return std::nullopt;
+    /* Sprawdz TTL przez meta file */
+    uint64_t ts = 0; bool gpg_ok = false;
+    if (fs::exists(meta_path)) {
+        if (!read_meta(meta_path, ts, gpg_ok)) return std::nullopt;
+        if (unix_now() - ts > max_age_s_) {
+            log::debug("cache: wygasly " + suite + "/" + component);
+            return std::nullopt;
+        }
+    } else {
+        /* Brak meta -- plik mogl byc zapisany przez apt.
+         * Uzywamy stat() do pobrania mtime (C++17, bez file_clock C++20). */
+        struct ::stat st{};
+        if (::stat(pkgs_path.c_str(), &st) == 0) {
+            ts = static_cast<uint64_t>(st.st_mtime);
+            if (unix_now() - ts > max_age_s_) {
+                log::debug("cache: wygasly (mtime) " + suite + "/" + component);
+                return std::nullopt;
+            }
+            gpg_ok = true;
+            log::debug("cache: trafienie apt (mtime) " + suite + "/" + component);
+        }
     }
 
-    /* Wczytaj Packages */
-    std::ifstream pf(pkgs, std::ios::binary);
+    std::ifstream pf(pkgs_path, std::ios::binary);
     if (!pf.is_open()) return std::nullopt;
     std::ostringstream buf;
     buf << pf.rdbuf();
 
-    /* Wczytaj InRelease jeśli istnieje */
+    /* Wczytaj InRelease jesli istnieje */
     std::string inrelease;
-    std::string ir_path = inrelease_path(key);
+    std::string ir_path = lists_dir_ + "/" +
+                         url_to_apt_prefix(base_url) + "_dists_" + suite + "_InRelease";
     if (fs::exists(ir_path)) {
         std::ifstream irf(ir_path);
         std::ostringstream ibuf;
@@ -140,12 +142,14 @@ std::optional<CacheEntry> IndexCache::get(const std::string& base_url,
         inrelease = ibuf.str();
     }
 
-    log::debug("cache: trafienie dla " + suite + "/" + component +
-               " (wiek: " + std::to_string((now - ts) / 60) + " min)");
+    uint64_t age_min = (unix_now() - ts) / 60;
+    log::debug("cache: trafienie " + suite + "/" + component +
+               " (wiek: " + std::to_string(age_min) + " min, plik: " +
+               apt_packages_filename(base_url, suite, component, arch) + ")");
 
     CacheEntry ce;
     ce.packages_content  = buf.str();
-    ce.inrelease_content = std::move(inrelease);
+    ce.inrelease_content = inrelease;
     ce.cached_at_unix    = ts;
     ce.gpg_verified      = gpg_ok;
     return ce;
@@ -156,53 +160,72 @@ void IndexCache::put(const std::string& base_url,
                      const std::string& component,
                      const CacheEntry& entry)
 {
-    std::string key  = make_key(base_url, suite, component);
-    std::string pkgs = packages_path(key);
-    std::string meta = meta_path(key);
+    std::string arch = "amd64";
+    std::string pkgs_path = lists_dir_ + "/" +
+                            apt_packages_filename(base_url, suite, component, arch);
+    std::string meta_path = lists_dir_ + "/" +
+                            meta_filename(base_url, suite, component, arch);
 
     fs::create_directories(lists_dir_);
 
+    /* Zapisz Packages -- identyczny format i sciezka co apt */
     {
-        std::ofstream f(pkgs, std::ios::binary | std::ios::trunc);
+        std::ofstream f(pkgs_path, std::ios::binary | std::ios::trunc);
         f << entry.packages_content;
     }
 
-    write_meta(meta, entry.cached_at_unix > 0 ? entry.cached_at_unix : unix_now(),
+    /* Metadane TTL (dodatkowy plik, apt go ignoruje) */
+    write_meta(meta_path,
+               entry.cached_at_unix > 0 ? entry.cached_at_unix : unix_now(),
                entry.gpg_verified);
 
-    /* Zapisz InRelease jeśli podano */
+    /* Zapisz InRelease jesli podano */
     if (!entry.inrelease_content.empty()) {
-        std::ofstream irf(inrelease_path(key), std::ios::trunc);
+        std::string ir_path = lists_dir_ + "/" +
+            url_to_apt_prefix(base_url) + "_dists_" + suite + "_InRelease";
+        std::ofstream irf(ir_path, std::ios::trunc);
         irf << entry.inrelease_content;
     }
 
-    log::debug("cache: zapisano " + suite + "/" + component);
+    log::debug("cache: zapisano " + pkgs_path);
 }
 
 void IndexCache::clear() {
     std::error_code ec;
+    int removed = 0;
     for (auto& entry : fs::directory_iterator(lists_dir_, ec)) {
-        fs::remove(entry.path(), ec);
+        /* Usun tylko nasze pliki meta -- nie usuwaj plikow apt */
+        auto name = entry.path().filename().string();
+        static const std::string deb_sfx = ".deb-ostree-meta";
+        bool is_meta = name.size() >= deb_sfx.size() &&
+                       name.compare(name.size() - deb_sfx.size(),
+                                    deb_sfx.size(), deb_sfx) == 0;
+        if (is_meta) {
+            fs::remove(entry.path(), ec);
+            /* Usun tez odpowiadajacy plik Packages jezeli istnieje */
+            std::string pkgs = entry.path().string().substr(
+                0, entry.path().string().size() - deb_sfx.size());
+            fs::remove(pkgs, ec);
+            ++removed;
+        }
     }
-    log::info("cache: wyczyszczono indeksy apt.");
+    log::info("cache: wyczyszczono " + std::to_string(removed) + " wpisow.");
 }
 
 void IndexCache::prune() {
     uint64_t now = unix_now();
     std::error_code ec;
     int removed = 0;
+    static const std::string meta_sfx = ".deb-ostree-meta";
 
     for (auto& entry : fs::directory_iterator(lists_dir_, ec)) {
         auto path = entry.path().string();
-        /* ends_with() jest C++20 -- używamy rfind jako substytut C++17 */
-        static const std::string meta_sfx = ".meta";
         bool is_meta = path.size() >= meta_sfx.size() &&
                        path.compare(path.size() - meta_sfx.size(),
                                     meta_sfx.size(), meta_sfx) == 0;
         if (is_meta) {
             uint64_t ts; bool gpg_ok;
             if (read_meta(path, ts, gpg_ok) && (now - ts > max_age_s_)) {
-                /* Usun powiazane pliki -- uzyj meta_sfx.size() dla spojnosci */
                 std::string base = path.substr(0, path.size() - meta_sfx.size());
                 fs::remove(base, ec);
                 fs::remove(path, ec);
@@ -210,9 +233,8 @@ void IndexCache::prune() {
             }
         }
     }
-
     if (removed > 0)
-        log::info("cache: usunięto " + std::to_string(removed) + " wygasłych wpisów.");
+        log::info("cache: usunieto " + std::to_string(removed) + " wygaslych wpisow.");
 }
 
 } // namespace debostree::cache
