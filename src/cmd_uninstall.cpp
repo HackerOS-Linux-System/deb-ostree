@@ -5,6 +5,7 @@
 #include "../cmd/tree_export.h"
 #include "../cmd/logging.h"
 #include "../cmd/progress.h"
+#include "../cmd/oci_ref.h"
 
 #include <iostream>
 #include <filesystem>
@@ -23,6 +24,12 @@ int uninstall(const std::vector<std::string>& args, const Config& cfg) {
         Sysroot sysroot = Sysroot::open(cfg.sysroot_path);
         auto booted = sysroot.booted_deployment();
         if (!booted) { log::error("Brak zabootowanego deploymentu."); return 1; }
+
+        try { oci::require_origin_refspec(booted->origin_refspec, "uninstall"); }
+        catch (const std::exception& e) {
+            std::cerr << "\033[1;31mBlad:\033[0m " << e.what() << "\n";
+            return 1;
+        }
 
         /* Etap 1: checkout bazy */
         {
