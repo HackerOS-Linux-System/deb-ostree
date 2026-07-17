@@ -1,47 +1,70 @@
 #pragma once
 /*
  * deb-ostree -- status_db.h
- * Lokalna baza zainstalowanych pakietow -- zastepuje /var/lib/dpkg/status
- * i /var/lib/dpkg/info/<pkg>.list, ktorych deb-ostree NIE uzywa (bo nie ma
- * dpkg w ogole).
+ * Baza zainstalowanych pakietow warstwowych.
  *
- * Format: jeden plik JSON-lines w merged_dir/var/lib/deb-ostree/status.db,
- * jedna linia per zainstalowany pakiet:
+ * Wersja: 0.2.0
+ *   Uzywamy /var/lib/dpkg/status jako PRIMARY store (format RFC822 dpkg).
+ *   Lista plikow pakietu: /var/lib/dpkg/info/<pkg>.list (identycznie z dpkg).
+ *   Skrypty maintainer:   /var/lib/dpkg/info/<pkg>.{preinst,postinst,...}
  *
- *   {"name":"vim","version":"2:9.0.1378-2","files":["/usr/bin/vim", ...]}
+ * deb-ostree NIE wywoluje dpkg -- czyta i pisze te pliki bezposrednio.
+ * Dzieki temu "dpkg -l", "dpkg -L <pkg>", "apt list --installed" widza
+ * pakiety zainstalowane przez deb-ostree bez zadnej synchronizacji.
  *
- * Uzywane przez DebLayer do:
- *   - is_installed() -- sprawdzenie czy pakiet jest juz w bazie
- *   - remove_packages() -- odczytanie listy plikow nalezacych do pakietu
- *
- * Wersja: 0.1.0
+ * Format /var/lib/dpkg/status (RFC 822, identyczny z dpkg):
+ *   Package: vim
+ *   Status: install ok installed
+ *   Architecture: amd64
+ *   Version: 2:9.0.1378-2
+ *   Installed-By: deb-ostree
+ *   Description: ...
+ *   (pusta linia oddziela rekordy)
  */
 
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <cstdint>
 
 namespace debostree::statusdb {
 
 struct InstalledPackage {
     std::string name;
     std::string version;
-    std::vector<std::string> files; /* sciezki absolutne wewnatrz rootfs */
+    std::string architecture;
+    std::string maintainer;
+    std::string description;
+    std::string depends;
+    std::string pre_depends;
+    std::string provides;
+    std::string section;
+    std::string priority;
+    uint64_t    installed_size = 0;
+    std::vector<std::string> files;  /* z /var/lib/dpkg/info/<pkg>.list */
+    std::string status = "install ok installed";
 };
 
-/* Wczytuje baze z rootfs_path/var/lib/deb-ostree/status.db. Zwraca pusta
- * liste jesli plik nie istnieje. */
+/* Sciezki (identyczne z dpkg) */
+std::string dpkg_status_path  (const std::string& rootfs_path);
+std::string dpkg_info_dir     (const std::string& rootfs_path);
+std::string dpkg_list_path    (const std::string& rootfs_path, const std::string& pkg);
+
+/* Wczytuje wszystkie pakiety warstwowe deb-ostree z dpkg/status.
+ * Kryterium: wpis ma pole "Installed-By: deb-ostree" */
 std::vector<InstalledPackage> load(const std::string& rootfs_path);
 
-/* Zapisuje cala liste z powrotem do pliku (nadpisuje). */
-void save(const std::string& rootfs_path, const std::vector<InstalledPackage>& packages);
+/* Wczytuje wszystkie pakiety z dpkg/status (wlacznie z obrazem bazowym).
+ * Uzyteczne do wykrywania konfliktow przez SolvPool::add_installed_packages(). */
+std::vector<InstalledPackage> load_all(const std::string& rootfs_path);
 
-/* Dodaje lub aktualizuje wpis pakietu w bazie. */
+/* Zapisuje/aktualizuje pakiet w dpkg/status + tworzy dpkg/info/<pkg>.list */
 void upsert(const std::string& rootfs_path, const InstalledPackage& pkg);
 
-/* Usuwa wpis pakietu z bazy. Nie usuwa plikow z dysku -- to robi caller. */
-void remove(const std::string& rootfs_path, const std::string& package_name);
+/* Usuwa pakiet z dpkg/status i dpkg/info/<pkg>.* */
+void remove(const std::string& rootfs_path, const std::string& name);
 
-/* Sprawdza czy pakiet jest w bazie. */
-bool is_installed(const std::string& rootfs_path, const std::string& package_name);
+/* Czy pakiet jest zainstalowany przez deb-ostree? */
+bool is_installed(const std::string& rootfs_path, const std::string& name);
 
 } // namespace debostree::statusdb
