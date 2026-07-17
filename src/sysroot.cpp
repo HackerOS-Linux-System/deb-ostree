@@ -1,10 +1,15 @@
 #include "../cmd/sysroot.h"
 #include "../cmd/logging.h"
+#include "../cmd/process.h"
 
 #include <gio/gio.h>
 #include <string>
 #include <vector>
+#include <fstream>
 #include <stdexcept>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 namespace debostree {
 
@@ -283,6 +288,36 @@ TransactionResult Sysroot::write_deployments(const std::vector<Deployment>& deps
 
     res.success = true;
     return res;
+}
+
+/* ── Sysroot::check_repo_integrity [NOWE 0.2.0] ── */
+void Sysroot::check_repo_integrity(bool slow_fsck) {
+    GFile* gf   = ostree_sysroot_get_path(sysroot_.get());
+    char*  base_ = g_file_get_path(gf);
+    std::string sysroot_path(base_);
+    g_free(base_);
+    std::string repo_config = sysroot_path + "/ostree/repo/config";
+    if (!fs::exists(repo_config))
+        throw std::runtime_error(
+            "Repozytorium OSTree nie istnieje lub jest uszkodzone: "
+            + repo_config + "\n"
+            "Sprawdz czy system jest poprawnie zainicjalizowany przez 'deb-ostree deploy'.");
+
+    std::ifstream cfg_check(repo_config);
+    if (!cfg_check.good())
+        throw std::runtime_error(
+            "Nie mozna odczytac " + repo_config + " -- sprawdz uprawnienia.");
+
+    if (slow_fsck) {
+        auto r = process::run({"ostree", "fsck",
+                               "--repo=" + sysroot_path + "/ostree/repo"});
+        if (!r.ok())
+            throw std::runtime_error(
+                "ostree fsck wykryl uszkodzenia w repo:\n" + r.stderr_data +
+                "\nSprobuj: ostree fsck --repo=/ostree/repo --delete");
+    }
+
+    log::debug("check_repo_integrity: repo OK (" + repo_config + ")");
 }
 
 } // namespace debostree
