@@ -14,7 +14,7 @@
  * Implementacja przez wywołanie gpgv (lekki weryfikator GPG bez agenta,
  * zawarty w pakiecie gpg lub gnupg) -- nie reimplementujemy GPG.
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include <string>
