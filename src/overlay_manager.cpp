@@ -3,6 +3,7 @@
 #include "../cmd/logging.h"
 
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <sstream>
 
@@ -35,6 +36,34 @@ OverlaySession OverlayManager::begin_session(const std::string& lower_dir) {
     opts << "lowerdir="  << s.lower_dir
          << ",upperdir=" << s.upper_dir
          << ",workdir="  << s.work_dir;
+
+    /* Early-check: czy overlayfs jest dostepny w kernelu (#4).
+     * Sprawdzamy /proc/filesystems -- jesli "overlay" nie ma wpisu,
+     * probujemy modprobe overlay przed wlasciwym mount(). */
+    {
+        std::ifstream proc_fs("/proc/filesystems");
+        std::string line;
+        bool overlay_available = false;
+        while (std::getline(proc_fs, line)) {
+            if (line.find("overlay") != std::string::npos) {
+                overlay_available = true;
+                break;
+            }
+        }
+        if (!overlay_available) {
+            log::debug("overlayfs nie znaleziony w /proc/filesystems -- probuje modprobe");
+            auto mp = process::run({"modprobe", "overlay"});
+            if (!mp.ok()) {
+                throw std::runtime_error(
+                    "overlayfs niedostepny w tym kernelu.\n"
+                    "Sprawdz:\n"
+                    "  cat /proc/filesystems | grep overlay\n"
+                    "  modprobe overlay\n"
+                    "W kontenerach Docker wymagana flaga --privileged lub "
+                    "--cap-add SYS_ADMIN.");
+            }
+        }
+    }
 
     auto res = process::run({"mount", "-t", "overlay", "overlay",
                              "-o", opts.str(), s.merged_dir});
