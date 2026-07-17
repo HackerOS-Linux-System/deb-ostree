@@ -10,7 +10,8 @@ namespace fs = std::filesystem;
 namespace debostree::maintscripts {
 
 std::string info_dir(const std::string& rootfs_path) {
-    return rootfs_path + "/var/lib/deb-ostree/info";
+    /* /var/lib/dpkg/info/ -- identycznie z dpkg */
+    return rootfs_path + "/var/lib/dpkg/info";
 }
 
 static std::string script_path(const std::string& rootfs_path,
@@ -26,9 +27,8 @@ void save_script(const std::string& rootfs_path,
 {
     if (script_content.empty()) return;
 
-    std::string dir = info_dir(rootfs_path);
     std::error_code ec;
-    fs::create_directories(dir, ec);
+    fs::create_directories(info_dir(rootfs_path), ec);
 
     std::string path = script_path(rootfs_path, package_name, script_type);
     std::ofstream f(path, std::ios::trunc);
@@ -43,7 +43,7 @@ void save_script(const std::string& rootfs_path,
         fs::perms::others_read | fs::perms::others_exec,
         ec);
 
-    log::debug("maintscripts: zapisano " + package_name + "." + script_type);
+    log::debug("maintscripts: /var/lib/dpkg/info/" + package_name + "." + script_type);
 }
 
 std::string load_script(const std::string& rootfs_path,
@@ -62,10 +62,11 @@ void remove_scripts(const std::string& rootfs_path,
                     const std::string& package_name)
 {
     std::error_code ec;
+    /* Usun skrypty -- zachowaj .list i .md5sums (dpkg ich nie usuwa przy remove) */
     for (auto& t : {"preinst", "postinst", "prerm", "postrm", "config"}) {
         fs::remove(script_path(rootfs_path, package_name, t), ec);
     }
-    log::debug("maintscripts: usunieto skrypty " + package_name);
+    log::debug("maintscripts: usunieto skrypty " + package_name + " z dpkg/info/");
 }
 
 } // namespace debostree::maintscripts
