@@ -14,7 +14,7 @@
  *
  * Ten sam layout co /var/lib/dpkg/info/ -- kompatybilny z dpkg.
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include <string>
