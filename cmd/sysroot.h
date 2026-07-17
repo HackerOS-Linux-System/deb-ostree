@@ -10,7 +10,7 @@
  *   2. Zachowuje poprzedni deployment jako dostepny do rollback.
  *   3. Nie dotyka aktywnie dzialajacego systemu -- zmiana wchodzi po reboot.
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include "types.h"
@@ -63,7 +63,7 @@ public:
      * Zapisuje zmodyfikowaną listę deploymentów (po zmianie flagi pinned itp.).
      * Używane przez "deb-ostree pin" (#13 z listy braków).
      *
-     * Wersja: 0.1.0
+     * Wersja: 0.2.0
      */
     TransactionResult write_deployments(const std::vector<Deployment>& deployments);
 
@@ -73,6 +73,13 @@ public:
 
     ::OstreeSysroot*  raw()  const { return sysroot_.get(); }
     ostree::Repo&     repo()       { return repo_; }
+
+    /*
+     * Sprawdza integralnosc repozytorium OSTree (#10).
+     * Weryfikuje istnienie /ostree/repo/config i mozliwosc odczytu.
+     * slow_fsck=true uruchamia "ostree fsck" (wolne).
+     */
+    void check_repo_integrity(bool slow_fsck = false);
 
 private:
     Sysroot(::OstreeSysroot* s, ostree::Repo r)
