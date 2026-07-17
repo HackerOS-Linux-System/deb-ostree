@@ -8,7 +8,7 @@
  * Przy starcie sprawdzamy też plik .incomplete -- jeśli istnieje, poprzednia
  * transakcja została przerwana i wymagany jest cleanup.
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include <string>
