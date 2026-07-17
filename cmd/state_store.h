@@ -8,7 +8,7 @@
  * przez wysokopoziomowe API (Config). Reszta kodu dostaje gotowy struct
  * Config i nigdy nie czyta pliku .hk bezposrednio.
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  */
 
 #include "types.h"
