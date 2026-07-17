@@ -4,7 +4,7 @@
  * Pobieranie InRelease, indeksów Packages i plików .deb z mirrorów Debiana
  * przez HTTP/HTTPS, z weryfikacją SHA256 i retry.
  *
- * Wersja: 0.1.0
+ * Wersja: 0.2.0
  *   - Dodano fetch_inrelease() -- pobieranie podpisanego pliku InRelease
  *   - Dodano fetch_packages_index_with_release_verify() -- weryfikacja SHA256
  *     indeksu względem sum z InRelease
